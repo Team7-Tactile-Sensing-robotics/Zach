@@ -1,0 +1,36 @@
+{
+  "channels": [
+    {
+      "channel": 1,
+      "dominant_frequency_Hz": 464.0,
+      "peak_amplitude_V": 0.0022295623167443686,
+      "spectral_peak_frequencies_Hz": [
+        464.0,
+        1392.0,
+        2304.0
+      ],
+      "spectral_peak_amplitudes_V": [
+        0.0022295623167443686,
+        0.0002555866387955148,
+        7.107079009598053e-05
+      ],
+      "spectral_energy_V2_s": 8.019865951333158e-07
+    },
+    {
+      "channel": 2,
+      "dominant_frequency_Hz": null,
+      "peak_amplitude_V": 0.0,
+      "spectral_peak_frequencies_Hz": [],
+      "spectral_peak_amplitudes_V": [],
+      "spectral_energy_V2_s": 0.0
+    }
+  ],
+  "channel_1_to_2_peak_amplitude_ratio": null,
+  "frequency_resolution_Hz": 4.0,
+  "sample_rate_Hz": 48000.0,
+  "start_s": 0.0,
+  "end_s": 0.24997916666666667,
+  "window": "hann",
+  "frf_valid_bins": 418,
+  "interpretation": "Spectral peaks are observations, not automatic modal identifications. Y/U is an approximate finite-record FRF only where excitation is nonzero."
+}

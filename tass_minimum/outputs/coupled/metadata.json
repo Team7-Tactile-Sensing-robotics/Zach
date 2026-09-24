@@ -1,0 +1,13 @@
+{
+  "dx_m": 0.0015,
+  "substeps_per_sample": 2,
+  "internal_dt_s": 1.0416666666666666e-05,
+  "exciter_actual_position_m": 0.024,
+  "contact_actual_position_m": 0.048,
+  "highest_mesh_frequency_bound_Hz": 20131.684841794813,
+  "contact_boundary_type": "HardContact",
+  "schema_version": "1.0",
+  "tension_mode": "simulated",
+  "tension_law_override": false,
+  "parameters_are_calibrated": false
+}

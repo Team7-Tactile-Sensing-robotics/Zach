@@ -1,0 +1,20 @@
+test_contact_force_equilibrium (test_physics.MechanicsTests.test_contact_force_equilibrium) ... ok
+test_simulated_tension_coupled_equilibrium (test_physics.MechanicsTests.test_simulated_tension_coupled_equilibrium) ... ok
+test_slack_tendon_cannot_push (test_physics.MechanicsTests.test_slack_tendon_cannot_push) ... ok
+test_static_equilibrium (test_physics.MechanicsTests.test_static_equilibrium) ... ok
+test_zero_input_equilibrium (test_physics.MechanicsTests.test_zero_input_equilibrium) ... ok
+test_csv_roundtrip_and_shared_processing (test_physics.PipelineTests.test_csv_roundtrip_and_shared_processing) ... ok
+test_fft_amplitude_energy_and_frf_mask (test_physics.PipelineTests.test_fft_amplitude_energy_and_frf_mask) ... ok
+test_input_validation (test_physics.PipelineTests.test_input_validation) ... ok
+test_unexcited_frf_and_silent_channel_are_undefined (test_physics.PipelineTests.test_unexcited_frf_and_silent_channel_are_undefined) ... ok
+test_zero_state_pipeline (test_physics.PipelineTests.test_zero_state_pipeline) ... ok
+test_contact_location_frequencies_and_clamp (test_physics.StringTests.test_contact_location_frequencies_and_clamp) ... ok
+test_point_force_impulse_is_mesh_independent (test_physics.StringTests.test_point_force_impulse_is_mesh_independent) ... ok
+test_right_contact_span_frequency (test_physics.StringTests.test_right_contact_span_frequency) ... ok
+test_string_frequency (test_physics.StringTests.test_string_frequency) ... ok
+test_tension_frequency_scaling (test_physics.StringTests.test_tension_frequency_scaling) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 4.550s
+
+OK

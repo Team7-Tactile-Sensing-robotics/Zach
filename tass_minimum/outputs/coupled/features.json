@@ -1,0 +1,52 @@
+{
+  "channels": [
+    {
+      "channel": 1,
+      "dominant_frequency_Hz": 512.0,
+      "peak_amplitude_V": 0.01639480721411325,
+      "spectral_peak_frequencies_Hz": [
+        256.0,
+        512.0,
+        656.0,
+        700.0,
+        768.0
+      ],
+      "spectral_peak_amplitudes_V": [
+        0.008070103115327118,
+        0.01639480721411325,
+        0.004196287349021396,
+        0.006353842371852903,
+        0.00360558460641907
+      ],
+      "spectral_energy_V2_s": 0.00010016648246951753
+    },
+    {
+      "channel": 2,
+      "dominant_frequency_Hz": 512.0,
+      "peak_amplitude_V": 0.016607728005476382,
+      "spectral_peak_frequencies_Hz": [
+        256.0,
+        456.0,
+        464.0,
+        492.0,
+        512.0
+      ],
+      "spectral_peak_amplitudes_V": [
+        0.008153642555492164,
+        0.004891219367906474,
+        0.0051795116400225995,
+        0.003974092889247833,
+        0.016607728005476382
+      ],
+      "spectral_energy_V2_s": 9.045423428975957e-05
+    }
+  ],
+  "channel_1_to_2_peak_amplitude_ratio": 0.9871794148306786,
+  "frequency_resolution_Hz": 4.0,
+  "sample_rate_Hz": 48000.0,
+  "start_s": 0.0,
+  "end_s": 0.24997916666666667,
+  "window": "hann",
+  "frf_valid_bins": 440,
+  "interpretation": "Spectral peaks are observations, not automatic modal identifications. Y/U is an approximate finite-record FRF only where excitation is nonzero."
+}

@@ -1,0 +1,62 @@
+{
+  "motor": {
+    "spool_radius_m": 0.015
+  },
+  "joint": {
+    "moment_arm_m": 0.008,
+    "inertia_kg_m2": 2e-05,
+    "stiffness_Nm_rad": 0.25,
+    "damping_Nm_s_rad": 0.004,
+    "equilibrium_rad": 0.0,
+    "distal_length_m": 0.1,
+    "origin_xy_m": [
+      0.0,
+      0.0
+    ]
+  },
+  "axial": {
+    "mode": "measured",
+    "young_modulus_Pa": 2000000000.0,
+    "area_m2": 5e-07,
+    "rest_length_m": 0.1,
+    "damping_Ns_m": 0.05,
+    "preload_N": 0.0
+  },
+  "string": {
+    "length_m": 0.12,
+    "linear_density_kg_m": 0.002,
+    "distributed_damping_Ns_m2": 0.008,
+    "nodes": 81,
+    "exciter_position_m": 0.024
+  },
+  "contact": {
+    "enabled": true,
+    "finger_lever_arm_m": 0.04,
+    "tendon_position_m": 0.048,
+    "force_threshold_N": 0.0
+  },
+  "piezo": {
+    "positions_m": [
+      0.03,
+      0.09
+    ],
+    "mode": "displacement",
+    "gains": [
+      1000.0,
+      1000.0
+    ],
+    "noise_std_V": [
+      0.0,
+      0.0
+    ],
+    "seed": 7
+  },
+  "numerics": {
+    "sample_rate_Hz": 48000.0,
+    "duration_s": 0.25,
+    "joint_rtol": 1e-08,
+    "joint_atol": 1e-10,
+    "joint_max_step_s": 0.001,
+    "string_stability_factor": 0.8
+  }
+}
