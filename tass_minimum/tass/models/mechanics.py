@@ -3,6 +3,7 @@ from typing import Protocol
 import numpy as np
 from scipy.integrate import solve_ivp
 from ..config import ModelConfig
+from .tendon import Tendon
 
 
 class TensionLaw(Protocol):
@@ -25,22 +26,17 @@ class MeasuredTension:
 
 
 class ElasticTension:
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, tendon=None):
         self.config = config
+        self.tendon = tendon if tendon is not None else Tendon.from_config(config)
     def __call__(self, t, theta, omega, displacement, velocity):
-        c = self.config
-        extension = displacement - c.joint.moment_arm_m * (theta - c.joint.equilibrium_rad)
-        extension_rate = velocity - c.joint.moment_arm_m * omega
-        # A tendon cannot push. Preload represents an equivalent initial extension.
-        if extension + c.axial.preload_N / c.axial.stiffness_N_m <= 0:
-            return 0.0
-        return max(0.0, c.axial.preload_N + c.axial.stiffness_N_m*extension
-                   + c.axial.damping_Ns_m*extension_rate)
+        return float(self.tendon.elastic_state(theta, omega, displacement, velocity)[2])
 
 
-def joint_acceleration(theta, omega, tension, force, config):
+def joint_acceleration(theta, omega, tension, force, config, tendon=None):
     j, contact = config.joint, config.contact
-    return (j.moment_arm_m*tension - j.stiffness_Nm_rad*(theta-j.equilibrium_rad)
+    tendon = tendon if tendon is not None else Tendon.from_config(config)
+    return (tendon.joint_torque(theta, tension) - j.stiffness_Nm_rad*(theta-j.equilibrium_rad)
             - j.damping_Nm_s_rad*omega - contact.finger_lever_arm_m*force) / j.inertia_kg_m2
 
 
@@ -50,6 +46,7 @@ def forward_kinematics(theta, distance_m, origin_xy_m):
 
 
 def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=None):
+    tendon = Tendon.from_config(config)
     s, v, a = motor_kinematics(time_s, sampled["motor_angle_rad"], config.motor.spool_radius_m)
     force = sampled["contact_force_N"]
     if tension_law is None:
@@ -58,7 +55,7 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
                 raise ValueError("Measured mode requires Inputs.tension_N")
             tension_law = MeasuredTension(time_s, sampled["tension_N"])
         else:
-            tension_law = ElasticTension(config)
+            tension_law = ElasticTension(config, tendon)
 
     def tension_at(t, theta, omega):
         value = tension_law(t, theta, omega, np.interp(t, time_s, s), np.interp(t, time_s, v))
@@ -69,7 +66,7 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
     def rhs(t, state):
         theta, omega = state
         T = tension_at(t, theta, omega)
-        return [omega, joint_acceleration(theta, omega, T, np.interp(t, time_s, force), config)]
+        return [omega, joint_acceleration(theta, omega, T, np.interp(t, time_s, force), config, tendon)]
 
     initial = [config.joint.equilibrium_rad, 0.0] if initial_state is None else initial_state
     sol = solve_ivp(rhs, (time_s[0], time_s[-1]), initial, t_eval=time_s,
@@ -79,8 +76,14 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
         raise RuntimeError(sol.message)
     theta, omega = sol.y
     tension = np.array([tension_at(t, th, w) for t, th, w in zip(time_s, theta, omega)])
+    segments = tendon.path_segments(theta)
     return {"motor_angle_rad": sampled["motor_angle_rad"], "tendon_displacement_m": s,
             "tendon_velocity_m_s": v, "tendon_acceleration_m_s2": a,
             "joint_angle_rad": theta, "joint_velocity_rad_s": omega,
-            "joint_acceleration_rad_s2": joint_acceleration(theta, omega, tension, force, config),
+            "joint_acceleration_rad_s2": joint_acceleration(theta, omega, tension, force, config, tendon),
+            "tendon_path_length_m": sum(segments.values()),
+            "tendon_shortening_m": tendon.joint_displacement(theta),
+            "tendon_moment_arm_m": -tendon.path_length_derivative(theta),
+            "tendon_torque_Nm": tendon.joint_torque(theta, tension),
+            **{f"tendon_{name}_length_m": length for name, length in segments.items()},
             "tension_N": tension, "contact_force_N": force}

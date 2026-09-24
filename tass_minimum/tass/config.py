@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import math
+import warnings
 
 
 @dataclass(frozen=True)
@@ -12,13 +13,22 @@ class Motor:
 
 @dataclass(frozen=True)
 class Joint:
-    moment_arm_m: float = 0.008
     inertia_kg_m2: float = 2.0e-5
     stiffness_Nm_rad: float = 0.25
     damping_Nm_s_rad: float = 0.004
     equilibrium_rad: float = 0.0
     distal_length_m: float = 0.1
-    origin_xy_m: tuple[float, float] = (0.0, 0.0)
+    origin_xy_m: tuple[float, float] = (0.15, 0.0)
+
+
+@dataclass(frozen=True)
+class TendonRouting:
+    """World coordinates at the straight reference angle; P4 anchors the tendon."""
+    spool_position_m: tuple[float, float] = (0.0, 0.0)
+    p1_m: tuple[float, float] = (0.040, 0.005)
+    p2_m: tuple[float, float] = (0.120, 0.005)
+    p3_m: tuple[float, float] = (0.175, 0.005)
+    p4_m: tuple[float, float] = (0.230, 0.005)
 
 
 @dataclass(frozen=True)
@@ -29,6 +39,7 @@ class AxialTendon:
     rest_length_m: float = 0.1
     damping_Ns_m: float = 0.05
     preload_N: float = 0.0
+    slack_m: float = 0.0
 
     @property
     def stiffness_N_m(self):
@@ -76,6 +87,7 @@ class ModelConfig:
     motor: Motor = field(default_factory=Motor)
     joint: Joint = field(default_factory=Joint)
     axial: AxialTendon = field(default_factory=AxialTendon)
+    tendon_routing: TendonRouting = field(default_factory=TendonRouting)
     string: String = field(default_factory=String)
     contact: Contact = field(default_factory=Contact)
     piezo: Piezo = field(default_factory=Piezo)
@@ -86,7 +98,6 @@ class ModelConfig:
             if not math.isfinite(value) or value < 0 or (not allow_zero and value == 0):
                 raise ValueError(f"{name} must be finite and {'nonnegative' if allow_zero else 'positive'}")
         for name, value in [("spool radius", self.motor.spool_radius_m),
-                            ("moment arm", self.joint.moment_arm_m),
                             ("inertia", self.joint.inertia_kg_m2),
                             ("finger length", self.joint.distal_length_m),
                             ("E", self.axial.young_modulus_Pa), ("area", self.axial.area_m2),
@@ -102,6 +113,7 @@ class ModelConfig:
                             ("joint damping", self.joint.damping_Nm_s_rad),
                             ("axial damping", self.axial.damping_Ns_m),
                             ("preload", self.axial.preload_N),
+                            ("initial slack", self.axial.slack_m),
                             ("string damping", self.string.distributed_damping_Ns_m2),
                             ("contact threshold", self.contact.force_threshold_N)]:
             positive(name, value, True)
@@ -123,6 +135,8 @@ class ModelConfig:
             raise ValueError("Contact lever arm must lie along distal finger")
         if len(self.joint.origin_xy_m) != 2 or not all(math.isfinite(x) for x in (*self.joint.origin_xy_m, self.joint.equilibrium_rad)):
             raise ValueError("Joint origin and equilibrium must be finite")
+        from .models.tendon import Tendon
+        Tendon.from_config(self)  # Validate routing coordinates and reference span.
         n = len(self.piezo.positions_m)
         if n < 1 or len(self.piezo.gains) != n or len(self.piezo.noise_std_V) != n:
             raise ValueError("Piezo positions, gains and noise arrays must have equal nonzero length")
@@ -144,8 +158,13 @@ class ModelConfig:
     def load(cls, path):
         values = json.loads(Path(path).read_text())
         constructors = {"motor": Motor, "joint": Joint, "axial": AxialTendon,
+                        "tendon_routing": TendonRouting,
                         "string": String, "contact": Contact, "piezo": Piezo, "numerics": Numerics}
         unknown = values.keys() - constructors.keys()
         if unknown:
             raise ValueError(f"Unknown configuration sections: {sorted(unknown)}")
+        if "moment_arm_m" in values.get("joint", {}):
+            values["joint"].pop("moment_arm_m")
+            warnings.warn("joint.moment_arm_m is obsolete; configure tendon_routing for the new geometry model.",
+                          UserWarning, stacklevel=2)
         return cls(**{key: constructors[key](**value) for key, value in values.items()}).validate()

@@ -22,7 +22,7 @@ def simulate(config=None, inputs=None, *, initial_joint_state=None,
     active = config.contact.enabled & (sampled["contact_force_N"] > config.contact.force_threshold_N)
     string = vibration_solver(t, mechanics["tension_N"], sampled["excitation_N"], active, config,
                               initial_string_displacement, initial_string_velocity, contact_boundary)
-    theta = mechanics["joint_angle_rad"]
+    theta = mechanics["joint_angle_rad"] - config.joint.equilibrium_rad
     tip = forward_kinematics(theta, config.joint.distal_length_m, config.joint.origin_xy_m)
     contact_xy = forward_kinematics(theta, config.contact.finger_lever_arm_m, config.joint.origin_xy_m)
     mechanics.update({"contact_active": active.astype(float),
@@ -35,5 +35,6 @@ def simulate(config=None, inputs=None, *, initial_joint_state=None,
     return SimulationResult(measurement, string.grid_m, string.displacement_m, string.velocity_m_s,
                             config.to_dict(), {**string.metadata, "schema_version": "1.0",
                                               "tension_mode": config.axial.mode,
+                                              "mechanics_model": "routed_tendon",
                                               "tension_law_override": tension_law is not None,
                                               "parameters_are_calibrated": False})

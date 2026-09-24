@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from dataclasses import replace
 import numpy as np
+from scipy.optimize import brentq
 from tass import ModelConfig, Inputs, Measurement, simulate
 from tass.signals import Constant, Sine
 from tass.models.mechanics import simulate_mechanics, ElasticTension
@@ -14,6 +15,16 @@ from tass.io import save_measurement, load_measurement
 
 
 class MechanicsTests(unittest.TestCase):
+    @staticmethod
+    def bridge_length_and_arm(q):
+        # Independent closed form for the supplied P2/P3 coordinates:
+        # P2=(-a,h), P3=(b,h) relative to the joint at reference.
+        a, b, h = 0.030, 0.025, 0.005
+        length = np.sqrt(a*a + b*b + 2*h*h + 2*(a*b-h*h)*np.cos(q)
+                         - 2*h*(a+b)*np.sin(q))
+        arm = ((a*b-h*h)*np.sin(q) + h*(a+b)*np.cos(q))/length
+        return length, arm
+
     def run_mechanics(self, tension, force, mode="measured"):
         config = ModelConfig()
         config = replace(config, axial=replace(config.axial, mode=mode))
@@ -27,24 +38,42 @@ class MechanicsTests(unittest.TestCase):
 
     def test_static_equilibrium(self):
         config, result = self.run_mechanics(4, 0)
-        expected = config.joint.equilibrium_rad + config.joint.moment_arm_m*4/config.joint.stiffness_Nm_rad
+        expected = brentq(lambda q: self.bridge_length_and_arm(q)[1]*4
+                          - config.joint.stiffness_Nm_rad*q, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
 
     def test_contact_force_equilibrium(self):
         config, result = self.run_mechanics(4, 0.4)
-        expected = config.joint.equilibrium_rad + (config.joint.moment_arm_m*4 - config.contact.finger_lever_arm_m*0.4)/config.joint.stiffness_Nm_rad
+        expected = brentq(lambda q: self.bridge_length_and_arm(q)[1]*4
+                          - config.contact.finger_lever_arm_m*0.4
+                          - config.joint.stiffness_Nm_rad*q, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
 
     def test_simulated_tension_coupled_equilibrium(self):
         config, result = self.run_mechanics(0, 0, mode="simulated")
         j, k = config.joint, config.axial.stiffness_N_m
-        expected = j.equilibrium_rad + j.moment_arm_m*k*config.motor.spool_radius_m*0.12/(j.stiffness_Nm_rad+k*j.moment_arm_m**2)
+        def torque(q):
+            length, arm = self.bridge_length_and_arm(q)
+            tension = k*max(0.0, config.motor.spool_radius_m*0.12 + length - 0.055)
+            return arm*tension - j.stiffness_Nm_rad*q
+        expected = brentq(torque, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
         self.assertTrue(np.all(result["tension_N"] >= 0))
 
     def test_slack_tendon_cannot_push(self):
         law = ElasticTension(ModelConfig())
         self.assertEqual(law(0, 0.2, 0, 0, 0), 0)
+
+    def test_measured_and_override_tension_use_routed_torque(self):
+        config, result = self.run_mechanics(4, 0)
+        q = result["joint_angle_rad"]
+        length, arm = self.bridge_length_and_arm(q)
+        np.testing.assert_allclose(result["tendon_torque_Nm"], 4*arm, atol=1e-12)
+        np.testing.assert_allclose(result["tendon_p2_p3_length_m"], length, atol=1e-12)
+        t = np.arange(0, 0.5, 0.0005)
+        sampled = Inputs(motor_angle_rad=Constant(1.0)).sample(t)
+        override = simulate_mechanics(t, sampled, config, tension_law=lambda *args: 4.0)
+        np.testing.assert_allclose(override["joint_angle_rad"], q, atol=1e-12)
 
 
 class StringTests(unittest.TestCase):

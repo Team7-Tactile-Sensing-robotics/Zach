@@ -24,7 +24,9 @@ python -m unittest discover -s tests -v
 Optional: `python -m pip install -e .` installs the `tass` command and lets other
 projects import the package.
 
-Three examples are included, with generated data and plots in `outputs/`:
+Three examples are included. The committed data and plots in `outputs/` are
+snapshots from the earlier constant-moment-arm model; rerun the commands below
+to generate results with the routed tendon:
 
 | Scenario | Command | What it demonstrates |
 | --- | --- | --- |
@@ -50,13 +52,16 @@ The parameters most likely to change first are:
 | JSON section / field | Meaning | Default |
 | --- | --- | --- |
 | `motor.spool_radius_m` | Constant spool radius | 0.015 m |
-| `joint.moment_arm_m` | Effective tendon moment arm | 0.008 m |
+| `joint.origin_xy_m` | Joint center in world coordinates | [0.150, 0] m |
+| `tendon_routing` | Spool feed and P1–P4 reference coordinates | See routing below |
 | `joint.distal_length_m` | Finger segment length | 0.100 m |
 | `joint.inertia_kg_m2` | Distal rotational inertia | 2e-5 kg m² |
 | `joint.stiffness_Nm_rad` | Return spring stiffness | 0.25 N m/rad |
 | `joint.damping_Nm_s_rad` | Viscous joint damping | 0.004 N m s/rad |
 | `axial.mode` | Tension source | `measured` |
-| `axial.young_modulus_Pa`, `area_m2`, `rest_length_m` | Define axial stiffness `EA/L0` | 10,000 N/m combined |
+| `axial.young_modulus_Pa`, `area_m2`, `rest_length_m` | Define effective axial stiffness `EA/L0` | 10,000 N/m combined |
+| `axial.slack_m`, `preload_N` | Independent reference slack and preload offsets | 0 m; 0 N |
+| `axial.damping_Ns_m` | Axial damping while taut | 0.05 N s/m |
 | `string.length_m` | Fixed vibrating span, independent of axial rest length | 0.120 m |
 | `string.linear_density_kg_m` | Mass per length | 0.002 kg/m |
 | `string.distributed_damping_Ns_m2` | Distributed transverse damping | 0.008 N s/m² |
@@ -107,18 +112,23 @@ mode, and some modes disappear when a sensor or exciter lies at their nodes.
 
 Positive motor rotation winds the tendon; positive joint angle is flexion;
 positive external force opposes flexion. Angles are radians. The joint origin is
-the reference for world coordinates, and zero angle points along positive x.
+at `joint.origin_xy_m`. The straight reference pose at
+`theta = joint.equilibrium_rad` points along positive x; flexion rotates the
+distal segment counter-clockwise about that point.
 
 ```text
 s = r_motor * phi_motor
-shortening = r_tendon * (theta - theta_0)
-extension = s - shortening
+L(theta) = |spool-P1| + |P1-P2| + |P2-P3(theta)| + |P3-P4|
+shortening = L(theta_0) - L(theta)
+k_axial = EA/L0
+extension = s - shortening - slack + preload/k_axial
+extension_rate = s_dot + L_prime(theta)*theta_dot
 
 T = measured_load_cell_input
 or
-T = max(0, preload + (EA/L0)*extension + c_axial*extension_rate)
+T = max(0, k_axial*extension + c_axial*extension_rate) if extension > 0 else 0
 
-I * theta_ddot = r_tendon*T - k_joint*(theta-theta_0)
+I * theta_ddot = -L_prime(theta)*T - k_joint*(theta-theta_0)
                 - b_joint*theta_dot - r_contact*F_contact
 
 mu*y_tt + c_string*y_t - T*y_xx = F_excitation(t)*delta(x-x_exciter)
@@ -130,6 +140,50 @@ equivalent preload extension. In measured mode, the prescribed load-cell signal
 drives joint dynamics directly: changing the motor command alone cannot change
 the prescribed tension. Use simulated mode for the complete motor-to-tension
 causal chain.
+
+### Three-span tendon routing
+
+`models/tendon.py` implements the shared `Tendon` model, used by both
+`models/mechanics.py` and the root-level `tass_finger_dynamics_app.py`.
+The route is `spool -> P1 -> P2 -> P3 -> P4`:
+
+| Part | Default reference coordinates / length | Motion |
+| --- | --- | --- |
+| Spool feed | (0, 0) to P1 | Fixed feed span, about 40.31 mm |
+| Span 1: P1–P2 | (40, 5) to (120, 5) mm | Fixed 80 mm along segment 1 |
+| Span 2: P3–P4 | (175, 5) to (230, 5) mm | Fixed 55 mm along segment 2 |
+| Span 3: P2–P3 | Across joint at (150, 0) mm | 55 mm straight; 32.02 mm at 90° flexion |
+
+P1/P2 are fixed in the world frame. P3/P4 rotate about the joint by
+`theta-theta_0`. P1–P3 are frictionless sliding guides, and P4 is the distal
+attachment. The spool coordinate is an effective fixed feed point; changing
+spool tangency, guide wrap, joint-surface contact, and guide friction are not
+represented. The connecting span must remain straight and unobstructed.
+A collapsed P2–P3 span is rejected because its force direction is undefined.
+
+Only span 3 changes geometric length. The same analytical derivative `dL/dtheta`
+is used for stretch rate and joint torque, so virtual work is consistent.
+The effective flexion moment arm is **`-dL/dtheta`**: with the supplied geometry
+it is 5 mm at 0°, 15.04 mm at 45°, and 22.65 mm at 90°. This variation replaces
+the old constant `joint.moment_arm_m`. Older JSON files containing that field
+load with a warning and discard it; update their joint origin and routing
+coordinates explicitly before comparing results.
+
+Slack and preload are independent reference offsets: extension at zero winding
+in the straight pose is `preload/k_axial - slack`. Do not use `rest_length_m` to
+set initial slack. That parameter is the effective compliant length used in
+`EA/L0`; it is not forced to equal the drawn route. Existing package material
+values are retained (10,000 N/m); the app has its own editable stiffness and
+actuator settings. The model has uniform axial tension and no axial inertia.
+
+The app draws the same route with swapped display axes to show an upright finger.
+From the repository root, run `streamlit run tass_finger_dynamics_app.py` (requires
+Streamlit and pandas in addition to the package dependencies). Its servo response
+and joint stops remain active, and its equilibrium table uses the routed torque.
+
+Guide path coordinates are available for geometry inspection, but the existing
+fixed-span vibration model and sensor coordinates have not been remapped to this
+route. Mechanical contact distance and acoustic contact position remain separate.
 
 Joint dynamics use adaptive DOP853 integration. The string uses centered finite
 differences and RK4 with automatic substeps based on the maximum tension and
@@ -147,7 +201,7 @@ string arrays to start from a different condition.
 
 Contact distance along the finger and contact distance along the string are
 **separate inputs**. Their physical mapping depends on tendon routing and should
-be calibrated or supplied by a future geometry model.
+be calibrated separately; the new axial routing does not impose that mapping.
 
 ### Physical details worth keeping explicit
 
@@ -174,7 +228,7 @@ Every CLI simulation writes:
 
 | File | Contents |
 | --- | --- |
-| `timeseries.csv` | Time, motor command, winding displacement/velocity/acceleration, joint angle/velocity/acceleration, tension, contact force/location/state, contact and tip world coordinates, excitation, piezo voltages |
+| `timeseries.csv` | Time, motor command, winding displacement/velocity/acceleration, each routed span length, total path length, shortening, moment arm, tendon torque, joint angle/velocity/acceleration, tension, contact force/location/state, contact and tip world coordinates, excitation, piezo voltages |
 | `string_state.npz` | Complete `time_s`, `grid_m`, `displacement_m`, `velocity_m_s` arrays |
 | `spectrum.csv`, `spectrum.npz` | Frequency, voltage amplitude, excitation amplitude, complex approximate FRF, valid-bin mask |
 | `features.json` | Dominant frequency, peak amplitude, spectral peaks, spectral energy and channel amplitude ratio |
@@ -239,7 +293,7 @@ of fixed natural frequencies. Use `start_s` / `end_s` to select an interval.
 | --- | --- | --- |
 | New motor command, pulse train or experimental trajectory | `signals.py` / `Inputs` | Sampled scalar inputs |
 | Load-cell tension or a different elastic law | `models/mechanics.py`, or `tension_law=` | Nonnegative tension in N |
-| Variable spool radius or nonlinear routing | `motor_kinematics`, `simulate_mechanics` | Mechanical channel dictionary |
+| Variable spool radius, guide wrap or a different tendon route | `motor_kinematics`, `models/tendon.py` | Mechanical channel dictionary |
 | Encoder-driven replay | `mechanical_solver=` or a direct `Measurement` | Joint/tension channels |
 | Compliant contact | `models/contact.py` and string stability bound | Boundary constraints plus contact acceleration |
 | Multiple exciters, variable length, bending stiffness, FE/modal model | `vibration_solver=` | `StringResult` grid, displacement and velocity |
@@ -266,6 +320,9 @@ Run `python -m unittest discover -s tests -v`. The tests check the supplied
 zero-input, static equilibrium, contact-force equilibrium, string-frequency,
 tension-scaling and contact-location requirements, plus elastic coupling,
 force normalization, fixed boundaries and the common data/processing interface.
+Routing checks cover constant link spans, cross-joint shortening, the analytical
+path derivative, virtual work, stretch rate, slack/preload, coordinate transforms,
+and nonlinear static equilibrium.
 
 For the saved baseline (`L=0.12 m`, `T=4 N`, `mu=0.002 kg/m`), the first three
 analytical frequencies are **186.34, 372.68, 559.02 Hz**. The pulse simulation has
