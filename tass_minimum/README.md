@@ -1,5 +1,7 @@
 # TASS minimum analytical model
 
+> For installation, the interactive app, and the integrated routed modal sweep, see the [project quickstart](../README.md). The equations below describe the time-domain reference workflow.
+
 A runnable Python model of the V1 single-joint finger, based on the supplied
 **TASS Minimum Analytical Model** notes and **Team 7 Project Proposal**.
 

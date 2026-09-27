@@ -56,5 +56,7 @@ def save_run(result, frequency, directory):
                         grid_m=result.grid_m, displacement_m=result.displacement_m,
                         velocity_m_s=result.velocity_m_s)
     (directory/"config.json").write_text(json.dumps(result.config, indent=2)+"\n")
+    import yaml
+    (directory/"config.yaml").write_text(yaml.safe_dump(result.config, sort_keys=False))
     (directory/"metadata.json").write_text(json.dumps(result.metadata, indent=2)+"\n")
     save_frequency_result(frequency, directory)

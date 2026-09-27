@@ -77,6 +77,8 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
     theta, omega = sol.y
     tension = np.array([tension_at(t, th, w) for t, th, w in zip(time_s, theta, omega)])
     segments = tendon.path_segments(theta)
+    guide_coordinates = tendon.guide_path_coordinates(theta)
+    extension, extension_rate, _ = tendon.elastic_state(theta, omega, s, v)
     return {"motor_angle_rad": sampled["motor_angle_rad"], "tendon_displacement_m": s,
             "tendon_velocity_m_s": v, "tendon_acceleration_m_s2": a,
             "joint_angle_rad": theta, "joint_velocity_rad_s": omega,
@@ -85,5 +87,10 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
             "tendon_shortening_m": tendon.joint_displacement(theta),
             "tendon_moment_arm_m": -tendon.path_length_derivative(theta),
             "tendon_torque_Nm": tendon.joint_torque(theta, tension),
+            "tendon_free_length_m": tendon.rest_length - s,
+            "tendon_required_length_m": tendon.required_length(theta),
+            "tendon_extension_m": extension,
+            "tendon_extension_rate_m_s": extension_rate,
+            **{f"tendon_p{i+1}_coordinate_m": guide_coordinates[:, i] for i in range(4)},
             **{f"tendon_{name}_length_m": length for name, length in segments.items()},
             "tension_N": tension, "contact_force_N": force}

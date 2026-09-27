@@ -1,0 +1,185 @@
+{
+  "motor": {
+    "spool_radius_m": 0.015
+  },
+  "joint": {
+    "inertia_kg_m2": 2e-05,
+    "stiffness_Nm_rad": 0.25,
+    "damping_Nm_s_rad": 0.004,
+    "equilibrium_rad": 0.0,
+    "distal_length_m": 0.1,
+    "origin_xy_m": [
+      0.15,
+      0.0
+    ]
+  },
+  "axial": {
+    "mode": "simulated",
+    "young_modulus_Pa": 2000000000.0,
+    "area_m2": 5e-07,
+    "rest_length_m": 0.1,
+    "damping_Ns_m": 0.05,
+    "preload_N": 0.0,
+    "slack_m": 0.0
+  },
+  "tendon_routing": {
+    "spool_position_m": [
+      0.0,
+      0.0
+    ],
+    "p1_m": [
+      0.04,
+      0.005
+    ],
+    "p2_m": [
+      0.12,
+      0.005
+    ],
+    "p3_m": [
+      0.175,
+      0.005
+    ],
+    "p4_m": [
+      0.23,
+      0.005
+    ]
+  },
+  "string": {
+    "length_m": 0.12,
+    "linear_density_kg_m": 0.002,
+    "distributed_damping_Ns_m2": 0.008,
+    "nodes": 81,
+    "exciter_position_m": 0.024
+  },
+  "contact": {
+    "enabled": true,
+    "finger_lever_arm_m": 0.04,
+    "tendon_position_m": 0.048,
+    "force_threshold_N": 0.0
+  },
+  "piezo": {
+    "positions_m": [
+      0.03,
+      0.09
+    ],
+    "mode": "displacement",
+    "gains": [
+      1000.0,
+      1000.0
+    ],
+    "noise_std_V": [
+      0.0,
+      0.0
+    ],
+    "seed": 7
+  },
+  "numerics": {
+    "sample_rate_Hz": 48000.0,
+    "duration_s": 0.25,
+    "joint_rtol": 1e-08,
+    "joint_atol": 1e-10,
+    "joint_max_step_s": 0.001,
+    "string_stability_factor": 0.8
+  },
+  "modal_sweep": {
+    "joint_angle_deg": 0.0,
+    "motor_angle_rad": 0.12,
+    "tension_N": null,
+    "start_Hz": 20.0,
+    "stop_Hz": 2000.0,
+    "step_Hz": 2.0,
+    "modes": 12,
+    "damping_ratio": 0.02
+  },
+  "experiment": {
+    "scenario": "coupled",
+    "motor_initial_rad": 0.12,
+    "motor_final_rad": 0.18,
+    "measured_tension_N": 4.0,
+    "contact_force_N": 0.4,
+    "excitation_amplitude_N": 0.002,
+    "pulse_start_s": 0.002,
+    "pulse_width_s": 0.0005,
+    "chirp_start_Hz": 80.0,
+    "chirp_end_Hz": 1800.0,
+    "motor_ramp_start_fraction": 0.05,
+    "motor_ramp_end_fraction": 0.4,
+    "contact_ramp_start_fraction": 0.55,
+    "contact_ramp_end_fraction": 0.65
+  },
+  "modal_piezo": {
+    "pair_ids": [
+      "pair1",
+      "pair2",
+      "pair3",
+      "pair4"
+    ],
+    "guide_numbers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "actuator_amplitudes_au": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "actuator_phases_rad": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "sensor_gains": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "analysis": {
+    "start_s": null,
+    "end_s": null,
+    "window": "hann",
+    "max_peaks": 5,
+    "frf_floor_relative": 0.001
+  },
+  "app": {
+    "motor_angle_deg": 90.0,
+    "segment1_length_mm": 150.0,
+    "segment2_length_mm": 100.0,
+    "inertia_kg_m2": 0.0002,
+    "joint_damping_Nm_s_rad": 0.002,
+    "spring_stiffness_Nm_rad": 0.08,
+    "guide_offset_mm": 5.0,
+    "p1_fraction": 0.26666666666666666,
+    "p2_percent": 80,
+    "p3_percent": 25,
+    "p4_fraction": 0.8,
+    "spool_radius_mm": 6.0,
+    "tendon_stiffness_N_m": 2500.0,
+    "tendon_rest_length_m": 0.25,
+    "tendon_damping_Ns_m": 0.1,
+    "slack_mm": 0.0,
+    "preload_N": 0.0,
+    "servo_time_constant_s": 0.1,
+    "servo_speed_deg_s": 300.0,
+    "contact_force_N": 0.0,
+    "contact_percent": 70,
+    "joint_max_deg": 100.0,
+    "duration_s": 2.0,
+    "time_step_s": 0.0005,
+    "equilibrium_grid_points": 5001,
+    "table_motor_angles_deg": [
+      0,
+      30,
+      60,
+      90,
+      120,
+      150,
+      180
+    ]
+  }
+}

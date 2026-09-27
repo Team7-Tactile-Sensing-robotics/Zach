@@ -12,6 +12,41 @@ from tass.signals import Constant
 
 
 class TendonTests(unittest.TestCase):
+    def test_source_state_and_density(self):
+        tendon = Tendon(mu=0.0007, slack=0.001, preload=0.2)
+        self.assertEqual(tendon.mu, 0.0007)
+        for q, qdot, wound, speed in [(0, 0, 0, 0), (0.4, 0.2, 0.02, 0.01),
+                                       (0.7, -0.3, -0.01, 0.2)]:
+            tendon.compute(q, qdot, wound, speed)
+            self.assertAlmostEqual(tendon.free_length, tendon.rest_length-wound)
+            self.assertAlmostEqual(tendon.required_length_current,
+                                   tendon.fixed_extra_length+tendon.path_length(q))
+            self.assertAlmostEqual(tendon.raw_extension,
+                                   tendon.required_length_current-tendon.free_length
+                                   -tendon.slack+tendon.preload/tendon.k)
+            rotated = tendon.joint_position + tendon.rotation_matrix(q-tendon.q0) @ (
+                tendon.p3_reference-tendon.joint_position)
+            np.testing.assert_allclose(tendon.guide_positions(q)[2], rotated)
+        for mu in (0, -1, np.nan):
+            with self.assertRaises(ValueError):
+                Tendon(mu=mu)
+
+    def test_source_preset_and_pipeline_lengths(self):
+        path = Path(__file__).resolve().parents[1]/"config/string_finger_tendon.json"
+        config = ModelConfig.load(path)
+        tendon = Tendon.from_config(config)
+        self.assertEqual(tendon.k, 500)
+        self.assertEqual(tendon.c, 0.1)
+        self.assertEqual(tendon.mu, 0.0005)
+        self.assertEqual(tendon.rest_length, 0.25)
+        config = replace(config, numerics=replace(config.numerics, duration_s=0.002))
+        result = simulate(config, Inputs(excitation_N=Constant(0)))
+        channels = result.measurement.channels
+        np.testing.assert_allclose(channels["tendon_extension_m"],
+                                   channels["tendon_required_length_m"]-channels["tendon_free_length_m"],
+                                   atol=1e-15)
+        np.testing.assert_allclose(channels["tendon_p4_coordinate_m"], channels["tendon_path_length_m"])
+
     def test_three_spans_and_shortening(self):
         tendon = Tendon()
         q = np.deg2rad([0, 45, 90])

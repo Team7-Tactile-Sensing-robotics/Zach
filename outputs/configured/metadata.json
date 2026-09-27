@@ -1,0 +1,14 @@
+{
+  "dx_m": 0.0015,
+  "substeps_per_sample": 1,
+  "internal_dt_s": 2.0833333333333333e-05,
+  "exciter_actual_position_m": 0.024,
+  "contact_actual_position_m": 0.048,
+  "highest_mesh_frequency_bound_Hz": 9490.167245562361,
+  "contact_boundary_type": "HardContact",
+  "schema_version": "1.0",
+  "tension_mode": "measured",
+  "mechanics_model": "routed_tendon",
+  "tension_law_override": false,
+  "parameters_are_calibrated": false
+}
