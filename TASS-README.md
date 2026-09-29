@@ -12,6 +12,20 @@ not a trained contact-location or contact-force estimator.
 
 ## Run it
 
+For the finger-only interactive app, run from the repository root:
+
+```bash
+streamlit run finger_physical_app.py
+```
+
+This app requires Streamlit, NumPy, and the existing package dependencies. It
+uses motor angle as its only physical input. Wind/unwind buttons, release, hold,
+and a motor-angle slider drive a persistent finger simulation with a live diagram
+and state readouts. Pause/resume freezes simulation time; reset restores the
+initial state. Fixed mechanical parameters are at the top of the new file.
+No acoustic solver runs. Its checks run with
+`python -m unittest discover -s tests -v` from the repository root.
+
 Requires Python 3.10 or later. Unzip the project and open a terminal in
 `tass_minimum/`:
 
