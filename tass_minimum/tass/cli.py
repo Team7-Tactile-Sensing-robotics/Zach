@@ -25,7 +25,7 @@ def scenario_inputs(config):
                                       e.contact_ramp_start_fraction*duration, e.contact_ramp_end_fraction*duration),
             excitation_N=Chirp(e.excitation_amplitude_N, e.chirp_start_Hz, e.chirp_end_Hz, duration),
             **common)
-    return Inputs(motor_angle_rad=Constant(e.motor_initial_rad),
+    return Inputs(motor_angle_rad=Constant(e.motor_initial_rad if e.baseline_motor_angle_rad is None else e.baseline_motor_angle_rad),
                   contact_force_N=Constant(e.contact_force_N if e.scenario == "contact" else 0),
                   excitation_N=Pulse(e.excitation_amplitude_N, e.pulse_start_s, e.pulse_width_s), **common)
 
@@ -47,8 +47,15 @@ def main():
     parser.add_argument("--step-Hz", type=float)
     parser.add_argument("--modes", type=int)
     parser.add_argument("--modal-damping-ratio", type=float)
+    parser.add_argument("--actuator", choices=["pair1", "pair2", "pair3", "pair4"], help="Select the routed time-domain actuator")
     args = parser.parse_args()
-    config = ModelConfig.load(args.config) if args.config else ModelConfig()
+    default_file = Path(__file__).resolve().parents[1]/"config/default.json"
+    config_file = args.config or (default_file if default_file.exists() else None)
+    config = ModelConfig.load(config_file) if config_file else ModelConfig()
+    if args.actuator:
+        if args.modal_sweep or not config.routed_pairs.enabled:
+            parser.error("--actuator requires routed time-domain mode")
+        config = replace(config, routed_pairs=replace(config.routed_pairs, active_actuator=args.actuator))
     if args.modal_sweep:
         overrides = {name: getattr(args, name) for name in (
             "joint_angle_deg", "motor_angle_rad", "tension_N", "start_Hz", "stop_Hz", "step_Hz", "modes")
@@ -81,7 +88,13 @@ def main():
             if args.tension_mode is None:
                 config = replace(config, axial=replace(config.axial, mode="simulated"))
         inputs = scenario_inputs(config)
-        result = simulate(config, inputs)
+        initial_joint_state = None
+        if scenario == "baseline" and config.spring.mode == "extension":
+            from .models.spring import static_operating_point
+            ready = static_operating_point(config, config.joint.equilibrium_rad)
+            if config.axial.mode == "simulated" and np.isclose(inputs.motor_angle_rad(0), ready["motor_angle_rad"]):
+                initial_joint_state = (config.joint.equilibrium_rad, 0.0)
+        result = simulate(config, inputs, initial_joint_state=initial_joint_state)
         frequency = extract_frequency_features(result.measurement, **asdict(config.analysis))
         save_run(result, frequency, args.output)
         plot_run(result, frequency, args.output/"overview.png", f"TASS / {scenario} / {config.axial.mode} tension")

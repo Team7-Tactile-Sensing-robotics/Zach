@@ -23,6 +23,13 @@ Alternatively, `python -m pip install -e './tass_minimum[app]'` installs both
 the package and all runtime dependencies in one command.
 All commands below start in `Zach/` with that environment activated.
 
+## Spring–tendon actuation
+
+The default preset now models the three stages in the sketch: relaxed at -10°,
+ready at 0°, and normal flexion. A geometric extension spring supplies the
+opposing torque. See [spring model, equations and run commands](tass_minimum/docs/spring_model.md).
+The upright spool height is 30 mm (`[0.03, 0]` in internal coordinates).
+
 ## Complete editable configuration
 
 Edit [`tass_minimum/config/default.json`](tass_minimum/config/default.json).
@@ -35,17 +42,20 @@ python -m tass --config tass_minimum/config/default.json --output outputs/config
 python -m tass --config tass_minimum/config/default.json --modal-sweep --output outputs/configured_modal
 ```
 
-Without `--config`, the CLI uses Python defaults. Explicit CLI overrides win
+Without `--config`, the CLI loads `tass_minimum/config/default.json` when available
+in this checkout (otherwise it falls back to legacy Python defaults). Explicit CLI overrides win
 for scenario, tension mode and sweep settings. The coupled demo selects simulated
 tension unless `--tension-mode measured` is given. Each simulated run saves the
 resolved configuration in JSON and YAML. YAML input is also supported.
 
 | Section | Used by |
 | --- | --- |
+| `spring` | Extension-spring stiffness, attachments and relaxed angle (or legacy torsional mode) |
 | `motor`, `joint`, `axial`, `tendon_routing` | CLI finger/tendon mechanics |
 | `string`, `contact`, `piezo`, `numerics` | Time-domain string, clamp, receiver and numerical settings |
 | `experiment` | CLI motor/load trajectories, measured tension, pulse/chirp excitation |
 | `modal_sweep` | Held pose, tension override, frequency range, mode count and damping |
+| `routed_pairs` | Four time-domain pairs, selected actuator, reference pose, anchor extension and sensor gains/noise |
 | `modal_piezo` | Four modal excitation/sensing pairs |
 | `analysis` | CLI FFT interval, window, peak count and FRF threshold |
 | `app` | Streamlit mechanics defaults, servo response, timestep and equilibrium table |
@@ -66,11 +76,73 @@ each received response. A zero amplitude disables an actuator. The result is a
 there is no calibrated voltage-to-force conversion, piezo circuit or ADC model.
 The pair assigned to P4 remains a fixed endpoint and has zero modeled response.
 
-**The time-domain preset has two receivers and one point-force exciter.**
-Its `piezo.positions_m`, `gains`, and `noise_std_V` arrays determine receiver
-count; extend all three arrays together to add receivers. Its single excitation
-location is `string.exciter_position_m`, with waveform in `experiment`.
-`modal_piezo` settings do not add actuators to this separate solver.
+**The default time-domain presets now have four force actuators and four receivers.**
+`routed_pairs.enabled=true` connects them to the actual P1-P4 tendon route:
+
+| Pair | Guide | Segment | Position along segment |
+| --- | --- | --- | --- |
+| pair1 | P1 | 1 (fixed) | Base/spool end |
+| pair2 | P2 | 1 (fixed) | Joint end |
+| pair3 | P3 | 2 (rotating) | Joint end |
+| pair4 | P4 | 2 (rotating) | Distal/tip end |
+
+“Top/bottom” means the two ends along each segment, not opposite surfaces.
+Reference coordinates are in `tendon_routing`; all four sit along the same
+routed tendon. Segment 2's world coordinates rotate with the joint.
+
+From `Zach/`, select an actuator and read all four sensors:
+
+```bash
+python -m tass --scenario coupled --actuator pair1 --output outputs/four_pairs
+python -m tass --scenario baseline --actuator pair3 --output outputs/pair3
+```
+
+The scalar demo waveform in `experiment` drives `routed_pairs.active_actuator`
+(default pair1); `--actuator` overrides it. For independent simultaneous inputs:
+
+```python
+from tass import ModelConfig, Inputs, simulate
+from tass.signals import Pulse, Sine
+
+config = ModelConfig.load("tass_minimum/config/default.json")
+result = simulate(config, Inputs(actuator_forces_N={
+    "pair1": Pulse(amplitude=0.002),
+    "pair3": Sine(amplitude=0.001, frequency_Hz=300),
+}))
+print(result.measurement.piezo_V.shape)  # (samples, 4), pair1 through pair4
+```
+
+Forces are in newtons, not actuator volts. Omitted dictionary entries are off;
+`{}` turns all off. `None` uses the selected demo actuator. CSV records
+`actuator_pair1_force_N` through `actuator_pair4_force_N`, four piezo voltages,
+and each pair's moving world coordinates. Metadata identifies channel order,
+segment assignment, acoustic positions, and actual mesh excitation locations.
+With several driven actuators, the scalar Y/U FRF is disabled rather than dividing
+by their summed forces. Individual drive channels are preserved for later MIMO
+analysis; voltage spectra remain available.
+
+The acoustic solver uses the route at `routed_pairs.reference_angle_rad` as a
+**frozen reference span**, including the spool-to-P1 feed. It follows tension
+changes, but does not implement a moving mesh or intermediate guide constraints.
+Pair world coordinates still follow actual mechanics; large pose changes need
+a moving-boundary model for quantitative acoustic predictions.
+
+P4 is a fixed endpoint when `anchor_extension_m=0` (the default). Its point-force
+actuator cannot move that endpoint, and its displacement receiver is silent
+except for configured noise. If the real tendon continues beyond P4 to a separate
+anchor, set `anchor_extension_m` to that **measured** distance. Do not add a fictitious
+length merely to obtain a signal. Reaction-force sensing or driven-boundary piezo
+coupling needs a different physical model. The empirical modal sweep retains its
+own P4 endpoint assumption; the extension setting applies to time-domain mode.
+
+In routed mode, sensor gains/noise come from `routed_pairs`, while sensing mode
+and random seed come from `piezo`. Derived acoustic length, actuator positions,
+and receiver positions override the legacy `string.length_m`,
+`string.exciter_position_m` and `piezo.positions_m` for the solver. The saved
+configuration remains replayable; resolved acoustic geometry is in metadata.
+Set `routed_pairs.enabled=false` to run the legacy independent span with two
+receivers and one exciter. `ModelConfig()` retains that legacy default for Python
+API compatibility; load the supplied JSON to select the four-pair model.
 
 The JSON contains all exposed configuration fields for these workflows. Model
 assumptions (such as fixed endpoints), UI layout, and optional Python callbacks
@@ -83,7 +155,7 @@ python -m streamlit run tass_finger_dynamics_app.py
 ```
 
 Open the local URL printed by Streamlit. Adjust motor command, tendon routing,
-stiffness, slack/preload, contact force and joint limits. The app plots finger
+stiffness, physical rest length and slack, contact force and joint limits. The app plots finger
 geometry, joint motion and tension. It shares the tendon model with both
 simulation workflows; vibration sweeps are run through the CLI below.
 
@@ -93,7 +165,7 @@ The shared `tass/models/tendon.py` now includes string-finger-simulator's
 routed geometry, winding/free-length state, fixed reference-length offset,
 linear density (`mu`), rotation helper, tension and joint-torque interface.
 Both the Streamlit app and CLI use this class. Zach retains its analytical
-path derivative, vectorized calculations, validation, slack and preload.
+path derivative, vectorized calculations, validation and slack.
 
 To run the source project's tendon/spool parameters in Zach, from `Zach/`
 with the environment above activated:
@@ -126,12 +198,40 @@ print(tendon.guide_path_coordinates(0.2))
 ```
 
 Use keyword arguments when porting constructors: `mu` is keyword-only in Zach
-to preserve its existing positional argument order. `fixed_extra_length` is a
-read-only reference offset, which may be negative for an effective compliant
-length shorter than the drawn route. At zero slack/preload, extension is
-`required_length_current - free_length`. Slack and preload add independent offsets.
+to preserve its existing positional argument order. The tendon uses physical rest
+length: `extension = path_length - (rest_length - winding) - slack`.
+There is no `fixed_extra_length` or independent preload parameter. Initial
+pretension comes from the chosen rest length and winding.
 CSV mechanical outputs include `tendon_free_length_m`, `tendon_required_length_m`,
 signed `tendon_extension_m`, extension rate and P1-P4 path coordinates.
+
+### Physical rest length and migration
+
+The legacy Python defaults use a 0.23031128874149276 m unstretched length.
+The active extension-spring JSON preset instead uses 0.21043479108399377 m,
+matching its raised-spool, 15-mm-guide route at the -10° relaxed pose. With zero winding and zero additional slack, initial tension is
+zero at the configured relaxed pose. Material E and area A are retained, so
+`EA/L0` changes when the physical rest length changes. This is a demonstration setup, not a
+measurement of your prototype. Changing geometry does not automatically resize
+the physical tendon; update rest length deliberately when appropriate.
+
+The source-tendon preset retains its 0.25 m rest length and 500 N/m stiffness.
+With its 0.23031 m route it has about 19.69 mm of slack at zero winding; small
+motor commands can legitimately produce no tension. Choose measured rest length
+and initial winding for your hardware rather than hiding this slack with offsets.
+
+Old `axial.preload_N` or `app.preload_N` values of zero load with a migration
+warning and are dropped. Nonzero values are rejected so pretension cannot be
+silently lost. For fixed E and A, zero winding and zero extra slack, an intended
+static pretension T at a held pose of route length L requires
+`L0 = L / (1 + T/(E*A))`. The app instead specifies stiffness directly, so it
+uses `L0 = L - T/k` under those same conditions. These formulas assume a held
+pose; a freely moving joint must also satisfy torque balance.
+
+Winding must remain between zero and rest length. The app exposes physical rest
+length and no longer passes an unsupported preload argument. Archived output
+configurations retain their original values; rerun experiments with the updated
+input presets to get results for the new setup.
 
 ## Integrated routed-tendon modal sweep
 
@@ -167,8 +267,8 @@ Each modal output directory contains:
 `models/tendon.py` already implements the source project's route
 `spool -> P1 -> P2 -> P3 -> P4`. The integration reuses it rather than introducing
 a second tendon class. It retains Zach's analytical path derivative, validation,
-slack and preload. With slack/preload zero, its extension law is equivalent to
-the source's fixed-extra-length convention. Stiffness is `E*A/rest_length`;
+slack. Zach now uses physical rest length, whereas the source project uses a
+reference-length offset; the same numerical rest length need not give the same tension. Stiffness is `E*A/rest_length`;
 when transferring the source's `k`, choose these parameters to give that value.
 The optional `string_finger_tendon.json` preset transfers the tendon/spool defaults;
 source YAML is not loaded automatically.
@@ -203,8 +303,8 @@ python -m tass --scenario coupled --output outputs/coupled_new
 - `coupled`: motor ramp, elastic tendon tension, opposing contact force and chirp.
 
 These commands retain the finite-difference string solver and existing piezo
-voltage processing. They use the independently configured `string.length_m`,
-not the full routed length used by the modal sweep. Frequencies from the two
+voltage processing. With the supplied presets they use the routed reference span described above.
+With `routed_pairs.enabled=false`, they use the independent `string.length_m`. Frequencies from the two
 workflows are comparable only when span, tension, density and boundaries match.
 
 Outputs include `overview.png`, `timeseries.csv`, `string_state.npz`, spectra,
@@ -217,6 +317,24 @@ For hardware/saved CSV processing:
 ```bash
 python -m tass --process-csv outputs/baseline_new/timeseries.csv --output outputs/reprocessed
 ```
+
+## First simulation dataset
+
+The [Version 1 collection protocol](tass_minimum/docs/dataset_v1.md) specifies
+16 location/force conditions, 20 trials per condition, 1-second four-channel
+windows at 48 kHz, two class labels, and complete-trial train/validation/test
+splits. Parameters are in `tass_minimum/config/experiments/dataset_v1.json`.
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python -m tass.dataset \
+  --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_v1.json \
+  --output outputs/dataset_v1
+```
+
+Use a new output directory for a rerun. This is synthetic data with ideal static
+force balance, not digital-force-gauge measurements. The protocol documents the
+trial-count/location ambiguities, P4 boundary limitation and hardware procedure.
 
 ## Tests and code map
 

@@ -17,18 +17,18 @@ class Tendon:
             k=500.0,
             c=0.1,
             q0=0.0,
-            spool_position=(0.0, 0.0),
+            spool_position=(0.0, 0.03),
             joint_position=(0.15, 0.0),
-            p1=(0.040, 0.005),
-            p2=(0.120, 0.005),
-            p3=(0.175, 0.005),
-            p4=(0.230, 0.005),
+            p1=(0.040, 0.015),
+            p2=(0.120, 0.015),
+            p3=(0.175, 0.015),
+            p4=(0.230, 0.015),
             slack=0.0,
             *,
             mu=0.0005,
         ):
-        # rest_length is the effective unstretched compliant length. Initial
-        # slack/preload are independent of the explicitly drawn path length.
+        # rest_length is the physical unstretched length outside the spool
+        # at zero winding. slack adds an independent free-length allowance.
         for name, value in (
             ("rest_length", rest_length),
             ("k", k),
@@ -196,6 +196,8 @@ class Tendon:
             winding_velocity
         )
 
+        if not all(np.all(np.isfinite(value)) for value in (q, q_dot, wound_length, winding_velocity)):
+            raise ValueError("Tendon state values must be finite")
         if np.any(wound_length < 0):
             raise ValueError(
                 "Wound length must be nonnegative"

@@ -1,5 +1,6 @@
 
 from pathlib import Path
+from dataclasses import replace
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import streamlit as st
 from scipy.optimize import brentq
 from tass_minimum.tass.models.tendon import Tendon
 from tass_minimum.tass.config import ModelConfig
+from tass_minimum.tass.models.spring import ReturnSpring
 
 # ============================================================
 # TASS Single-Joint Tendon-Driven Finger Dynamics Demonstrator
@@ -14,11 +16,11 @@ from tass_minimum.tass.config import ModelConfig
 #
 # Model:
 #   Joint dynamics:
-#       J*theta_ddot + b*theta_dot + k_s*theta
+#       J*theta_ddot + b*theta_dot + tau_s(theta)
 #           = -L'(theta)*T - tau_ext
 #
 #   Tendon extension:
-#       delta_t = r_s*phi + L(theta) - L(0) - slack + preload/k_t
+#       delta_t = L(theta) - (rest_length - r_s*phi) - slack
 #
 #   Tendon tension:
 #       T = max(k_t*delta_t + c_t*delta_dot, 0) if delta_t > 0 else 0
@@ -49,7 +51,7 @@ from tass_minimum.tass.config import ModelConfig
 # - This is a reduced-order engineering model for concept exploration.
 # - The tendon is assumed massless in the arm-dynamics model.
 # - Tension is zero if the tendon would otherwise go slack.
-# - A hard joint stop is included at theta = 0 and theta = theta_max.
+# - Hard joint stops are included at the relaxed angle and theta_max.
 # - The servo is modeled as a first-order position actuator with a max speed.
 # ============================================================
 
@@ -134,13 +136,30 @@ slack_mm = st.sidebar.slider(
 )
 slack = slack_mm / 1000.0
 c_t = st.sidebar.number_input("Tendon damping c_t [N·s/m]", min_value=0.0, value=float(a.tendon_damping_Ns_m), step=0.01)
-preload = st.sidebar.number_input("Reference preload [N]", min_value=0.0, value=float(a.preload_N), step=0.1)
+rest_length = st.sidebar.number_input("Physical unstretched tendon length [m]", min_value=0.02, value=float(a.tendon_rest_length_m), step=0.001, format="%.6f")
 
 # Reference geometry is along +x; the plot below swaps axes to show the finger upright.
-tendon = Tendon(rest_length=a.tendon_rest_length_m, k=k_t, c=c_t, slack=slack, preload=preload,
+tendon = Tendon(rest_length=rest_length, k=k_t, c=c_t, slack=slack,
+                spool_position=model_config.tendon_routing.spool_position_m,
                 joint_position=(L1, 0.0),
                 p1=(L1*a.p1_fraction, guide_offset), p2=(L1*p2_fraction, guide_offset),
                 p3=(L1 + L2*p3_fraction, guide_offset), p4=(L1 + L2*a.p4_fraction, guide_offset))
+
+st.sidebar.header("Return spring")
+relaxed_deg = st.sidebar.slider("Relaxed finger angle [deg]", -20.0, 0.0,
+    float(np.rad2deg(model_config.spring.relaxed_angle_rad or 0.0)), 1.0)
+spring_stiffness = st.sidebar.number_input("Extension spring stiffness [N/m]", min_value=0.001,
+    value=float(model_config.spring.stiffness_N_m), step=10.0)
+shift = np.array([L1, 0.0])-np.asarray(model_config.joint.origin_xy_m)
+app_spring_config = replace(model_config,
+    joint=replace(model_config.joint, origin_xy_m=(L1, 0.0), equilibrium_rad=0.0, stiffness_Nm_rad=k_s),
+    spring=replace(model_config.spring, relaxed_angle_rad=float(np.deg2rad(relaxed_deg)),
+        stiffness_N_m=spring_stiffness,
+        base_anchor_m=tuple(np.asarray(model_config.spring.base_anchor_m)+shift),
+        distal_anchor_m=tuple(np.asarray(model_config.spring.distal_anchor_m)+shift)))
+spring = ReturnSpring(app_spring_config)
+theta_min = spring.relaxed_angle
+st.sidebar.caption(f"Spring model: {model_config.spring.mode}. The torsional stiffness control applies only in torsional mode.")
 
 st.sidebar.header("Servo dynamics")
 tau_servo = st.sidebar.slider(
@@ -180,6 +199,11 @@ dt = a.time_step_s
 # -----------------------------
 # Model helper functions
 # -----------------------------
+if r_s*np.pi > rest_length:
+    st.error("Tendon rest length must accommodate the app's 180° motor command range: increase rest length or reduce spool radius.")
+    st.stop()
+
+
 def tendon_tension(phi, theta, omega=0.0, phi_dot=0.0):
     """
     phi   : spool angle [rad]
@@ -192,7 +216,7 @@ def tendon_tension(phi, theta, omega=0.0, phi_dot=0.0):
 def static_equilibrium(phi_cmd):
     """
     Solve the quasi-static equilibrium numerically:
-        k_s*theta + tau_ext = -L'(theta)*T(theta, phi_cmd)
+        spring.resisting_torque(theta) + tau_ext = -L'(theta)*T(theta, phi_cmd)
 
     Returns:
         theta_eq [rad], T_eq [N]
@@ -200,12 +224,12 @@ def static_equilibrium(phi_cmd):
     tau_ext = F_ext * l_contact
 
     def net_torque(theta):
-        return tendon.joint_torque(theta, tendon_tension(phi_cmd, theta)) - k_s*theta - tau_ext
+        return tendon.joint_torque(theta, tendon_tension(phi_cmd, theta)) - spring.resisting_torque(theta) - tau_ext
 
     # Follow the first stable balance from the straight-finger stop.
-    if net_torque(0.0) <= 0:
-        return 0.0, float(tendon_tension(phi_cmd, 0.0))
-    theta_grid = np.linspace(0.0, theta_max, a.equilibrium_grid_points)
+    if net_torque(theta_min) <= 0:
+        return theta_min, float(tendon_tension(phi_cmd, theta_min))
+    theta_grid = np.linspace(theta_min, theta_max, a.equilibrium_grid_points)
     torque = net_torque(theta_grid)
     crossings = np.flatnonzero((torque[:-1] > 0) & (torque[1:] <= 0))
     if len(crossings):
@@ -234,8 +258,8 @@ def simulate(phi_cmd):
     phi = np.zeros(n)
     tension = np.zeros(n)
 
-    # Start in the straight, unspooled condition.
-    theta[0] = 0.0
+    # Start in the backward relaxed, unspooled condition.
+    theta[0] = theta_min
     omega[0] = 0.0
     phi[0] = 0.0
     tension[0] = tendon_tension(phi[0], theta[0])
@@ -257,7 +281,7 @@ def simulate(phi_cmd):
         theta_ddot = (
             tendon.joint_torque(theta[i], T)
             - b * omega[i]
-            - k_s * theta[i]
+            - spring.resisting_torque(theta[i])
             - tau_ext
         ) / J
 
@@ -265,9 +289,9 @@ def simulate(phi_cmd):
         omega[i + 1] = omega[i] + theta_ddot * dt
         theta[i + 1] = theta[i] + omega[i + 1] * dt
 
-        # Straight-finger endstop.
-        if theta[i + 1] < 0.0:
-            theta[i + 1] = 0.0
+        # Backward relaxed-position endstop.
+        if theta[i + 1] < theta_min:
+            theta[i + 1] = theta_min
             if omega[i + 1] < 0.0:
                 omega[i + 1] = 0.0
 
@@ -345,6 +369,9 @@ with left:
     for i, point in enumerate(guides, start=1):
         ax.annotate(f"P{i}" + (" anchor" if i == 4 else ""), point,
                     xytext=(5, 5), textcoords="offset points", fontsize=8)
+    if model_config.spring.mode == "extension":
+        spring_points = np.array([spring.base, spring.moving_anchor(theta[-1])])[:, ::-1]
+        ax.plot(spring_points[:, 0], spring_points[:, 1], color="orange", linewidth=3, label="Return spring")
     ax.legend(fontsize=8, loc="upper left")
 
     # External force arrow, assumed normal to the distal segment.
@@ -455,10 +482,15 @@ st.dataframe(df, use_container_width=True, hide_index=True)
 # -----------------------------
 # Model equations
 # -----------------------------
+st.subheader("Spring state")
+spring_state = spring.state(theta[-1])
+st.write({name: float(value) for name, value in spring_state.items()})
+st.caption("Initial: relaxed backward pose, zero spring force. Ready: straight with spring extension. Flexion: spring torque opposes tendon torque.")
+st.latex(r"F_s=k_s\max(0,\ell_s(q)-\ell_{s,0}),\quad \tau_s=F_s\frac{d\ell_s}{dq}")
 st.subheader("Equations used by the app")
 
 st.latex(
-    r"J\ddot{\theta} + b\dot{\theta} + k_s\theta "
+    r"J\ddot{\theta} + b\dot{\theta} + \tau_s(\theta) "
     r"= -L'(\theta) T - \tau_{\mathrm{ext}}"
 )
 st.write(
@@ -466,7 +498,7 @@ st.write(
     "θ = finger joint angle [rad]; "
     "J = joint rotational inertia [kg·m²]; "
     "b = joint viscous damping [N·m·s/rad]; "
-    "k_s = return-spring rotational stiffness [N·m/rad]; "
+    "k_s = legacy torsional stiffness [N·m/rad]; extension mode uses the geometric spring torque above; "
     "−L′(θ) = tendon moment arm from guide geometry [m]; "
     "T = tendon tension [N]; "
     "τ_ext = external contact torque [N·m]."
@@ -482,7 +514,7 @@ st.write(
     "φ = actual spool angle [rad]; "
     "L(θ) = routed tendon path length [m]; "
     "θ = finger joint angle [rad]; "
-    "δ_slack = initial tendon slack [m]; T₀ = reference preload [N]."
+    "δ_slack = additional free-length allowance [m]; L₀ = physical unstretched tendon length [m]."
 )
 
 st.latex(

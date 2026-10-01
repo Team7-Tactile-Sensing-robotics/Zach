@@ -54,7 +54,10 @@ class MechanicsTests(unittest.TestCase):
         j, k = config.joint, config.axial.stiffness_N_m
         def torque(q):
             length, arm = self.bridge_length_and_arm(q)
-            tension = k*max(0.0, config.motor.spool_radius_m*0.12 + length - 0.055)
+            # Independent route: feed + segment 1 + joint bridge + segment 2.
+            path = np.hypot(0.04, 0.005) + 0.08 + length + 0.055
+            tension = k*max(0.0, path - (config.axial.rest_length_m-config.motor.spool_radius_m*0.12)
+                            - config.axial.slack_m)
             return arm*tension - j.stiffness_Nm_rad*q
         expected = brentq(torque, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)

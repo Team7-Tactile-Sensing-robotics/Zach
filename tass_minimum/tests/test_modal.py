@@ -34,21 +34,23 @@ class ModalTests(unittest.TestCase):
         np.testing.assert_array_equal(bent.response[:, :, 3], 0)
         self.assertAlmostEqual(bent.guide_positions_m[-1], bent.metadata['path_length_m'])
 
-    def test_elastic_tension_slack_and_preload(self):
+    def test_elastic_tension_physical_rest_length(self):
         config = ModelConfig()
         result = run_modal_sweep(config, [100], motor_angle_rad=0.1)
         self.assertAlmostEqual(result.metadata['tension_N'],
                                config.axial.stiffness_N_m*config.motor.spool_radius_m*0.1)
         slack = run_modal_sweep(config, [100], motor_angle_rad=0)
         np.testing.assert_array_equal(slack.response, 0)
-        config = replace(config, axial=replace(config.axial, preload_N=3))
+        # Hold EA fixed: T = EA*(Lref/L0 - 1), so choose L0 for 3 N.
+        ea = config.axial.young_modulus_Pa*config.axial.area_m2
+        reference = float(Tendon.from_config(config).path_length(0))
+        config = replace(config, axial=replace(config.axial, rest_length_m=reference/(1+3/ea)))
         self.assertAlmostEqual(run_modal_sweep(config, [100], motor_angle_rad=0).metadata['tension_N'], 3)
 
-    def test_tendon_matches_source_extension_convention(self):
+    def test_tendon_matches_physical_extension_law(self):
         tendon = Tendon()
-        q, qdot, wound, speed = 0.3, 0.2, 0.01, 0.003
-        extra = tendon.rest_length-tendon.reference_path_length
-        extension = extra+tendon.path_length(q)-(tendon.rest_length-wound)
+        q, qdot, wound, speed = 0.3, 0.2, 0.04, 0.003
+        extension = tendon.path_length(q)-(tendon.rest_length-wound)-tendon.slack
         eps = 1e-6
         derivative = (tendon.path_length(q+eps)-tendon.path_length(q-eps))/(2*eps)
         expected = max(0, tendon.k*extension+tendon.c*(derivative*qdot+speed)) if extension > 0 else 0

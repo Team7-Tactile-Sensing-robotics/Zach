@@ -24,11 +24,19 @@ def simulate_string(time_s, tension_N, excitation_N, contact_active, config,
     dx = grid[1] - grid[0]
     if boundary is None:
         boundary = HardContact(grid, config.contact.tendon_position_m) if config.contact.enabled else NoContact()
-    exciter = int(np.argmin(abs(grid - p.exciter_position_m)))
-    if exciter in (0, p.nodes-1):
+    forces = np.asarray(excitation_N, dtype=float)
+    multiple = forces.ndim == 2
+    positions = p.exciter_positions_m if multiple else (p.exciter_position_m,)
+    if forces.shape != ((len(time_s), len(positions)) if multiple else (len(time_s),)) or not positions or not np.all(np.isfinite(forces)):
+        raise ValueError("Excitation must match the output clock and configured actuator count")
+    exciters = np.array([int(np.argmin(abs(grid-x))) for x in positions])
+    if not multiple and exciters[0] in (0, p.nodes-1):
         raise ValueError("Exciter snaps to an endpoint; refine mesh or move it inward")
-    if np.any(contact_active) and exciter in boundary.constrained_nodes(True):
+    if not multiple and np.any(contact_active) and exciters[0] in boundary.constrained_nodes(True):
         raise ValueError("Exciter is clamped by hard contact; choose a node on a free span")
+    excitation_N = forces
+    if multiple and any(node in (0, p.nodes-1) for node in exciters):
+        warnings.warn("A routed actuator is at a fixed endpoint: point-force motion and displacement sensing there are zero.", RuntimeWarning)
     mu = p.linear_density_kg_m
     decay = p.distributed_damping_Ns_m2 / mu
     omega_bound = 2*np.sqrt(float(np.max(tension_N))/mu) / dx
@@ -61,7 +69,7 @@ def simulate_string(time_s, tension_N, excitation_N, contact_active, config,
         out[0] = v
         out[1, 1:-1] = T/mu*(y[2:] - 2*y[1:-1] + y[:-2])/dx**2 - decay*v[1:-1]
         # Point force [N] / lumped nodal mass [kg], equivalent to q=F/dx [N/m].
-        out[1, exciter] += force/(mu*dx)
+        np.add.at(out[1], exciters, np.atleast_1d(force)/(mu*dx))
         out[1] += boundary.acceleration(y, v, active)
         clamp(out, active)
         return out
@@ -87,7 +95,9 @@ def simulate_string(time_s, tension_N, excitation_N, contact_active, config,
         raise RuntimeError("String solution diverged")
     return StringResult(grid, displacement, velocity, {
         "dx_m": dx, "substeps_per_sample": substeps, "internal_dt_s": h,
-        "exciter_actual_position_m": float(grid[exciter]),
+        "exciter_actual_position_m": float(grid[exciters[0]]),
+        "actuator_actual_positions_m": grid[exciters].tolist(),
+        "fixed_endpoint_actuator_indices": [i for i, node in enumerate(exciters) if node in (0, p.nodes-1)],
         "contact_actual_position_m": getattr(boundary, "actual_position_m", None),
         "highest_mesh_frequency_bound_Hz": max_mode_Hz,
         "contact_boundary_type": type(boundary).__name__,
