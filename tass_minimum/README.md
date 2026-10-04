@@ -190,37 +190,12 @@ the old constant `joint.moment_arm_m`. Older JSON files containing that field
 load with a warning and discard it; update their joint origin and routing
 coordinates explicitly before comparing results.
 
-<<<<<<< HEAD
 Rest length is the physical unstretched tendon length at zero winding. The
 new default is 0.23031128874149276 m, matching the straight reference route.
 Extension at zero winding is `L(theta_0) - rest_length_m - slack_m`. Pretension
 comes from shorter rest length or initial winding, not an independent preload
 parameter. Stiffness remains `EA/L0`, now about 4341.95 N/m with the default
 material and area. The model has uniform axial tension and no axial inertia.
-=======
-The return spring is an axial **linear extension spring**, not a torsional
-spring at the joint. One bracket attachment is fixed to segment 1, and the other
-rotates with segment 2. With the demonstration offsets (-12, -20) and (12, -20)
-mm from the joint, the spring is on the side opposite the tendon and lengthens
-as the finger flexes over the app's 0–100° range. Its force is `k*(length-free_length)`
-when stretched, zero when slack; torque is `-F*d(length)/dtheta`. Joint damping
-remains a separate torque. A shorter free length creates spring preload.
-Measured stiffness, free length and bracket dimensions should replace the
-placeholders together. The force law is linear in extension; its joint torque
-is geometry-dependent, not generally linear in joint angle.
-
-The reusable implementation is in `models/spring.py`. The batch simulator reads
-`return_spring` from `config/default.json`; old JSON `joint.stiffness_Nm_rad` is
-ignored with a migration warning because torsional stiffness cannot specify
-linear stiffness and attachment geometry.
-
-Slack and preload are independent reference offsets: extension at zero winding
-in the straight pose is `preload/k_axial - slack`. Do not use `rest_length_m` to
-set initial slack. That parameter is the effective compliant length used in
-`EA/L0`; it is not forced to equal the drawn route. Existing package material
-values are retained (10,000 N/m); the app has its own editable stiffness and
-actuator settings. The model has uniform axial tension and no axial inertia.
->>>>>>> origin/zach-dev
 
 The app draws the same route with swapped display axes to show an upright finger.
 From the repository root, run `streamlit run tass_finger_dynamics_app.py` (requires
@@ -367,14 +342,8 @@ zero-input, static equilibrium, contact-force equilibrium, string-frequency,
 tension-scaling and contact-location requirements, plus elastic coupling,
 force normalization, fixed boundaries and the common data/processing interface.
 Routing checks cover constant link spans, cross-joint shortening, the analytical
-<<<<<<< HEAD
 path derivative, virtual work, stretch rate, physical slack and initial tension, coordinate transforms,
 and nonlinear static equilibrium.
-=======
-path derivative, virtual work, stretch rate, slack/preload, coordinate transforms,
-nonlinear static equilibrium, the P4–load-cell tail, and spring torque checked
-against both its energy gradient and the force cross product.
->>>>>>> origin/zach-dev
 
 For the saved baseline (`L=0.12 m`, `T=4 N`, `mu=0.002 kg/m`), the first three
 analytical frequencies are **186.34, 372.68, 559.02 Hz**. The pulse simulation has

@@ -3,8 +3,8 @@
     "spool_radius_m": 0.005
   },
   "joint": {
-    "inertia_kg_m2": 2e-05,
     "stiffness_Nm_rad": 0.25,
+    "inertia_kg_m2": 2e-05,
     "damping_Nm_s_rad": 0.004,
     "equilibrium_rad": 0.0,
     "distal_length_m": 0.1,
@@ -202,6 +202,7 @@
   },
   "spring": {
     "mode": "torsional",
+    "free_length_m": null,
     "relaxed_angle_rad": null,
     "stiffness_N_m": 250.0,
     "base_anchor_m": [

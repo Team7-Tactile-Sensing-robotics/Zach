@@ -17,8 +17,9 @@ import time
 import numpy as np
 
 from finger_parameters import FingerParameters
+from tass_minimum.tass.config import ModelConfig, Joint, Spring
 from tass_minimum.tass.models.tendon import Tendon
-from tass_minimum.tass.models.spring import LinearReturnSpring
+from tass_minimum.tass.models.spring import ReturnSpring
 
 
 @dataclass
@@ -48,16 +49,25 @@ class FingerModel:
         self.tendon = Tendon(
             rest_length=p.tendon_rest_length_m,
             k=p.tendon_stiffness_N_m, c=p.tendon_damping_Ns_m,
-            slack=p.tendon_slack_m, preload=p.tendon_preload_N,
+            slack=p.tendon_slack_m,
             joint_position=joint, spool_position=p.spool_position_m,
             p1=p.tendon_p1_m, p2=p.tendon_p2_m,
             p3=joint+p.tendon_p3_offset_m, p4=joint+p.tendon_p4_offset_m,
             load_cell=joint+p.load_cell_offset_m,
         )
-        self.spring = LinearReturnSpring(
-            stiffness_N_m=p.spring_stiffness_N_m, free_length_m=p.spring_free_length_m,
-            fixed_offset_m=p.spring_fixed_offset_m, moving_offset_m=p.spring_moving_offset_m,
-            joint_position=joint)
+        # This app's material length controls EA/L; its initial slack/preload
+        # are specified separately. Convert that reference to the shared
+        # tendon's physical free length at zero winding.
+        self.tendon.rest_length = (self.tendon.reference_path_length
+                                   - p.tendon_preload_N/self.tendon.k)
+        if self.tendon.rest_length <= 0:
+            raise ValueError("Tendon preload exceeds the available reference length")
+        self.spring = ReturnSpring(ModelConfig(
+            joint=Joint(origin_xy_m=tuple(joint)),
+            spring=Spring(mode="extension", stiffness_N_m=p.spring_stiffness_N_m,
+                          free_length_m=p.spring_free_length_m,
+                          base_anchor_m=tuple(joint+p.spring_fixed_offset_m),
+                          distal_anchor_m=tuple(joint+p.spring_moving_offset_m))))
         self.state = FingerState()
         self.motor_target_rad = 0.0
 
@@ -78,8 +88,8 @@ class FingerModel:
         )
         moment_arm = -float(self.tendon.path_length_derivative(s.joint_angle_rad))
         tendon_torque = moment_arm*float(tension)
-        spring = self.spring.evaluate(s.joint_angle_rad)
-        spring_torque = float(spring['torque_Nm'])
+        spring = self.spring.state(s.joint_angle_rad)
+        spring_torque = -float(spring['spring_resisting_torque_Nm'])
         damping_torque = -p.joint_damping_Nm_s_rad*s.joint_velocity_rad_s
         net_torque = tendon_torque + spring_torque + damping_torque
         at_lower_stop = s.joint_angle_rad <= 0.0 and s.joint_velocity_rad_s <= 0.0
@@ -95,7 +105,9 @@ class FingerModel:
             "load_cell_force_N": float(tension),  # Ideal inline reading; no added compliance.
             "moment_arm_m": moment_arm,
             "tendon_torque_Nm": tendon_torque,
-            **{f"spring_{name}": float(value) for name, value in spring.items()},
+            **{name: float(value) for name, value in spring.items()},
+            "spring_torque_Nm": spring_torque,
+            "spring_moment_arm_m": float(self.spring.length_derivative(s.joint_angle_rad)),
             "damping_torque_Nm": damping_torque,
             "stop_reaction_Nm": reaction,
             "joint_acceleration_rad_s2": (net_torque+reaction)/p.joint_inertia_kg_m2,

@@ -27,6 +27,7 @@ class Tendon:
             slack=0.0,
             *,
             mu=0.0005,
+            load_cell=None,
         ):
         # rest_length is the physical unstretched length outside the spool
         # at zero winding. slack adds an independent free-length allowance.
@@ -62,13 +63,11 @@ class Tendon:
         for name, value in (("spool_position", spool_position), ("joint_position", joint_position),
                             ("p1", p1), ("p2", p2),
                             ("p3_reference", p3), ("p4_reference", p4),
-                            ("load_cell_reference", load_cell)):
+                            ("load_cell_reference", p4 if load_cell is None else load_cell)):
             point = np.array(value, dtype=float, copy=True)
             if point.shape != (2,) or not np.all(np.isfinite(point)):
                 raise ValueError(f"{name} must contain two finite coordinates")
             setattr(self, name, point)
-        if np.linalg.norm(self.load_cell_reference-self.p4_reference) <= 1e-12:
-            raise ValueError("Load-cell attachment must be distinct from P4")
         self.reference_path_length = float(self.path_length(self.q0))
         self.path_length_derivative(self.q0)  # Reject a collapsed joint span.
         self.compute(self.q0, 0.0, 0.0, 0.0)

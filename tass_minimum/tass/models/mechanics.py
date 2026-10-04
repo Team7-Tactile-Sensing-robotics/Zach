@@ -4,11 +4,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from ..config import ModelConfig
 from .tendon import Tendon
-<<<<<<< HEAD
 from .spring import ReturnSpring
-=======
-from .spring import LinearReturnSpring
->>>>>>> origin/zach-dev
 
 
 class TensionLaw(Protocol):
@@ -41,13 +37,8 @@ class ElasticTension:
 def joint_acceleration(theta, omega, tension, force, config, tendon=None, spring=None):
     j, contact = config.joint, config.contact
     tendon = tendon if tendon is not None else Tendon.from_config(config)
-<<<<<<< HEAD
     spring = spring if spring is not None else ReturnSpring(config)
     return (tendon.joint_torque(theta, tension) - spring.resisting_torque(theta)
-=======
-    spring = spring if spring is not None else LinearReturnSpring.from_config(config)
-    return (tendon.joint_torque(theta, tension) + spring.joint_torque(theta)
->>>>>>> origin/zach-dev
             - j.damping_Nm_s_rad*omega - contact.finger_lever_arm_m*force) / j.inertia_kg_m2
 
 
@@ -58,11 +49,7 @@ def forward_kinematics(theta, distance_m, origin_xy_m):
 
 def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=None):
     tendon = Tendon.from_config(config)
-<<<<<<< HEAD
     spring = ReturnSpring(config)
-=======
-    spring = LinearReturnSpring.from_config(config)
->>>>>>> origin/zach-dev
     s, v, a = motor_kinematics(time_s, sampled["motor_angle_rad"], config.motor.spool_radius_m)
     force = sampled["contact_force_N"]
     if tension_law is None:
@@ -99,12 +86,8 @@ def simulate_mechanics(time_s, sampled, config, initial_state=None, tension_law=
             "tendon_velocity_m_s": v, "tendon_acceleration_m_s2": a,
             "joint_angle_rad": theta, "joint_velocity_rad_s": omega,
             "joint_acceleration_rad_s2": joint_acceleration(theta, omega, tension, force, config, tendon, spring),
-<<<<<<< HEAD
             **spring.state(theta),
-=======
             "load_cell_force_N": tension.copy(),
-            **{f"spring_{name}": value for name, value in spring.evaluate(theta).items()},
->>>>>>> origin/zach-dev
             "tendon_path_length_m": sum(segments.values()),
             "tendon_shortening_m": tendon.joint_displacement(theta),
             "tendon_moment_arm_m": -tendon.path_length_derivative(theta),

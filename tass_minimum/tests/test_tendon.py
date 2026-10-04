@@ -69,7 +69,7 @@ class TendonTests(unittest.TestCase):
     def test_three_spans_and_shortening(self):
         # Explicit historical 5-mm guide geometry for the closed-form reference.
         tendon = Tendon(p1=(0.040, 0.005), p2=(0.120, 0.005),
-                        p3=(0.175, 0.005), p4=(0.230, 0.005))
+                        p3=(0.175, 0.005), p4=(0.230, 0.005), load_cell=(0.250, 0.005))
         q = np.deg2rad([0, 45, 90])
         spans = tendon.path_segments(q)
         np.testing.assert_allclose(spans["p1_p2"], 0.080, atol=1e-14)
@@ -132,8 +132,8 @@ class TendonTests(unittest.TestCase):
         np.testing.assert_allclose(moved.joint_torque(q+0.2, 4), tendon.joint_torque(q, 4), atol=1e-14)
 
     def test_load_cell_tail_changes_path_but_not_moment_arm(self):
-        first = Tendon()
-        second = Tendon(load_cell=(0.27, 0.005))
+        first = Tendon(p4=(0.23, 0.005), load_cell=(0.25, 0.005))
+        second = Tendon(p4=(0.23, 0.005), load_cell=(0.27, 0.005))
         q = np.linspace(0, 1.7, 20)
         np.testing.assert_allclose(second.path_length(q)-first.path_length(q), 0.020)
         np.testing.assert_allclose(second.path_length_derivative(q), first.path_length_derivative(q))

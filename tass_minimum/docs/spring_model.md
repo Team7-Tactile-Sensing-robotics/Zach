@@ -99,3 +99,13 @@ not a separate hard-coded torsional equation. Existing `outputs/dataset_v1`
 files were NOT overwritten: they represent the old model and retain their
 original config snapshot. Generate a new version to study the extension spring.
 The acoustic P4 endpoint limitation is unchanged by this mechanical revision.
+
+The shared implementation is `ReturnSpring(config)`; there is no
+`LinearReturnSpring` class. Configuration stores the `Spring` parameter
+record in `ModelConfig.spring`, not a constructed mechanical model.
+`spring.free_length_m = null` derives the natural length from the relaxed
+pose, preserving the three-stage model. An explicit positive free length
+supports measured springs and preload in the physical app. The physical
+app converts its joint-relative bracket offsets to world coordinates before
+constructing `ReturnSpring`; applied joint torque is the negative of
+`resisting_torque()`. `attachment_positions()` supplies the drawing geometry.

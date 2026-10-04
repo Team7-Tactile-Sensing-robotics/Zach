@@ -11,7 +11,12 @@ class ReturnSpring:
         self.origin = np.asarray(config.joint.origin_xy_m, float)
         self.base = np.asarray(self.params.base_anchor_m, float)
         self.distal = np.asarray(self.params.distal_anchor_m, float)
-        self.rest_length = float(self.length(self.relaxed_angle))
+        self.rest_length = (float(self.length(self.relaxed_angle)) if self.params.free_length_m is None
+                            else self.params.free_length_m)
+
+    def attachment_positions(self, q):
+        moving = self.moving_anchor(q)
+        return np.broadcast_to(self.base, moving.shape), moving
 
     def moving_anchor(self, q):
         angle = np.asarray(q)-self.joint.equilibrium_rad

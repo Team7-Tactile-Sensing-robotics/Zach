@@ -6,7 +6,6 @@ import math
 import warnings
 import yaml
 
-
 @dataclass(frozen=True)
 class Motor:
     spool_radius_m: float = 0.015
@@ -14,6 +13,7 @@ class Motor:
 
 @dataclass(frozen=True)
 class Joint:
+    stiffness_Nm_rad: float = 0.08
     inertia_kg_m2: float = 2.0e-5
     damping_Nm_s_rad: float = 0.004
     equilibrium_rad: float = 0.0
@@ -28,7 +28,7 @@ class TendonRouting:
     p1_m: tuple[float, float] = (0.040, 0.005)
     p2_m: tuple[float, float] = (0.120, 0.005)
     p3_m: tuple[float, float] = (0.175, 0.005)
-    p4_m: tuple[float, float] = (0.220, 0.005)
+    p4_m: tuple[float, float] = (0.230, 0.005)
 
 
 @dataclass(frozen=True)
@@ -176,6 +176,7 @@ class RoutedPairs:
 @dataclass(frozen=True)
 class Spring:
     mode: str = "torsional"  # Legacy configs retain their equivalent torsional law.
+    free_length_m: float | None = None  # Otherwise derive from relaxed pose.
     relaxed_angle_rad: float | None = None
     stiffness_N_m: float = 250.0
     base_anchor_m: tuple[float, float] = (0.130, -0.025)
@@ -188,7 +189,6 @@ class ModelConfig:
     joint: Joint = field(default_factory=Joint)
     axial: AxialTendon = field(default_factory=AxialTendon)
     tendon_routing: TendonRouting = field(default_factory=TendonRouting)
-    return_spring: ReturnSpring = field(default_factory=ReturnSpring)
     string: String = field(default_factory=String)
     contact: Contact = field(default_factory=Contact)
     piezo: Piezo = field(default_factory=Piezo)
@@ -247,8 +247,6 @@ class ModelConfig:
             raise ValueError("Joint origin and equilibrium must be finite")
         from .models.tendon import Tendon
         Tendon.from_config(self)  # Validate routing coordinates and reference span.
-        from .models.spring import LinearReturnSpring
-        LinearReturnSpring.from_config(self)
         n = len(self.piezo.positions_m)
         if n < 1 or len(self.piezo.gains) != n or len(self.piezo.noise_std_V) != n:
             raise ValueError("Piezo positions, gains and noise arrays must have equal nonzero length")
@@ -347,7 +345,10 @@ class ModelConfig:
             raise ValueError("spring.mode must be torsional or extension")
         if self.spring.relaxed_angle_rad is not None and not math.isfinite(self.spring.relaxed_angle_rad):
             raise ValueError("spring.relaxed_angle_rad must be finite")
-        positive("spring.stiffness_N_m", self.spring.stiffness_N_m)
+        positive("joint stiffness", self.joint.stiffness_Nm_rad, True)
+        positive("spring.stiffness_N_m", self.spring.stiffness_N_m, True)
+        if self.spring.free_length_m is not None:
+            positive("spring.free_length_m", self.spring.free_length_m)
         for point in (self.spring.base_anchor_m, self.spring.distal_anchor_m):
             if len(point) != 2 or not all(math.isfinite(v) for v in point):
                 raise ValueError("Spring anchors require two finite coordinates")
@@ -401,9 +402,5 @@ class ModelConfig:
         if "moment_arm_m" in values.get("joint", {}):
             values["joint"].pop("moment_arm_m")
             warnings.warn("joint.moment_arm_m is obsolete; configure tendon_routing for the new geometry model.",
-                          UserWarning, stacklevel=2)
-        if "stiffness_Nm_rad" in values.get("joint", {}):
-            values["joint"].pop("stiffness_Nm_rad")
-            warnings.warn("joint.stiffness_Nm_rad is obsolete; configure the linear return_spring and its attachments.",
                           UserWarning, stacklevel=2)
         return cls(**{key: constructors[key](**value) for key, value in values.items()}).validate()

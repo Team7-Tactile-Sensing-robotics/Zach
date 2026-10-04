@@ -17,10 +17,7 @@ from tass.io import save_measurement, load_measurement
 class MechanicsTests(unittest.TestCase):
     @staticmethod
     def spring_torque(q, config):
-        # Closed form for opposite-side bracket offsets (+/-12, -20) mm.
-        length = 2*(0.012*np.cos(q/2)+0.020*np.sin(q/2))
-        arm = -0.012*np.sin(q/2)+0.020*np.cos(q/2)
-        return -config.return_spring.stiffness_N_m*max(0, length-config.return_spring.free_length_m)*arm
+        return -config.joint.stiffness_Nm_rad*(q-config.joint.equilibrium_rad)
 
     @staticmethod
     def bridge_length_and_arm(q):
@@ -35,7 +32,7 @@ class MechanicsTests(unittest.TestCase):
     def run_mechanics(self, tension, force, mode="measured"):
         config = ModelConfig()
         config = replace(config, axial=replace(config.axial, mode=mode))
-        t = np.arange(0, 0.5, 0.0005)
+        t = np.arange(0, 3.0, 0.0005)  # Allow the torsional fixture to settle.
         sampled = Inputs(tension_N=Constant(tension), contact_force_N=Constant(force)).sample(t)
         return config, simulate_mechanics(t, sampled, config)
 
@@ -61,16 +58,11 @@ class MechanicsTests(unittest.TestCase):
         j, k = config.joint, config.axial.stiffness_N_m
         def torque(q):
             length, arm = self.bridge_length_and_arm(q)
-<<<<<<< HEAD
             # Independent route: feed + segment 1 + joint bridge + segment 2.
             path = np.hypot(0.04, 0.005) + 0.08 + length + 0.055
             tension = k*max(0.0, path - (config.axial.rest_length_m-config.motor.spool_radius_m*0.12)
                             - config.axial.slack_m)
             return arm*tension - j.stiffness_Nm_rad*q
-=======
-            tension = k*max(0.0, config.motor.spool_radius_m*0.12 + length - 0.055)
-            return arm*tension + self.spring_torque(q, config)
->>>>>>> origin/zach-dev
         expected = brentq(torque, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
         self.assertTrue(np.all(result["tension_N"] >= 0))
@@ -85,7 +77,7 @@ class MechanicsTests(unittest.TestCase):
         length, arm = self.bridge_length_and_arm(q)
         np.testing.assert_allclose(result["tendon_torque_Nm"], 4*arm, atol=1e-12)
         np.testing.assert_allclose(result["tendon_p2_p3_length_m"], length, atol=1e-12)
-        t = np.arange(0, 0.5, 0.0005)
+        t = np.arange(0, 3.0, 0.0005)  # Allow the torsional fixture to settle.
         sampled = Inputs(motor_angle_rad=Constant(1.0)).sample(t)
         override = simulate_mechanics(t, sampled, config, tension_law=lambda *args: 4.0)
         np.testing.assert_allclose(override["joint_angle_rad"], q, atol=1e-12)
