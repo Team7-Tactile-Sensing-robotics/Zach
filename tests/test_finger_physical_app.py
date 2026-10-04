@@ -3,6 +3,7 @@ from dataclasses import asdict, replace
 import math
 import unittest
 import xml.etree.ElementTree as ET
+from scipy.optimize import brentq
 
 from finger_physical_app import FingerModel, FingerParameters, finger_svg
 
@@ -36,8 +37,20 @@ class FingerModelTests(unittest.TestCase):
         model.set_motor_target(90)
         model.advance(2)
         r = model.readouts()
-        self.assertAlmostEqual(r['joint_angle_deg'], 44.2, delta=0.05)
-        self.assertAlmostEqual(r['tension_N'], 4.149, delta=0.005)
+        # Independent closed-form lengths/moment arms for the default layout.
+        def balance(q):
+            bridge = math.hypot(0.030+0.025*math.cos(q)-0.005*math.sin(q),
+                                0.025*math.sin(q)+0.005*math.cos(q)-0.005)
+            tendon_arm = ((0.030*0.025-0.005**2)*math.sin(q)+0.005*0.055*math.cos(q))/bridge
+            tension = 2500*max(0, 0.006*math.pi/2 + bridge-0.055)
+            length = 2*(0.012*math.cos(q/2)+0.020*math.sin(q/2))
+            spring_arm = -0.012*math.sin(q/2)+0.020*math.cos(q/2)
+            return tension*tendon_arm - 500*max(0, length-0.024)*spring_arm
+        expected = brentq(balance, 0, 1.5)
+        self.assertAlmostEqual(r['joint_angle_deg'], math.degrees(expected), delta=0.01)
+        self.assertGreater(r['spring_force_N'], 0)
+        self.assertEqual(r['load_cell_force_N'], r['tension_N'])
+        self.assertAlmostEqual(r['load_cell_tail_m'], 0.020)
         self.assertAlmostEqual(r['tendon_torque_Nm']+r['spring_torque_Nm'], 0, delta=1e-5)
         self.assertAlmostEqual(r['span_1_m'], 0.080)
         self.assertAlmostEqual(r['span_2_m'], 0.055)
@@ -81,6 +94,20 @@ class FingerModelTests(unittest.TestCase):
         svg = ET.fromstring(after)
         self.assertEqual(svg.attrib['viewBox'], '0 0 720 560')
         self.assertIn(f"{model.readouts()['joint_angle_deg']:.1f}°", after)
+        self.assertIn('P4 · guide', after)
+        self.assertIn('Load cell · anchor', after)
+        self.assertIn('Linear return spring', after)
+
+    def test_editable_geometry_and_preloaded_spring(self):
+        p = replace(FingerParameters(), load_cell_offset_m=(0.11, 0.005),
+                    spring_free_length_m=0.020, tendon_p4_offset_m=(0.075, 0.005))
+        model = FingerModel(p)
+        r = model.readouts()
+        self.assertAlmostEqual(r['load_cell_tail_m'], 0.035)
+        self.assertAlmostEqual(r['spring_force_N'], 500*0.004)
+        self.assertLess(r['spring_torque_Nm'], 0)
+        self.assertGreater(r['stop_reaction_Nm'], 0)
+        self.assertEqual(r['joint_acceleration_rad_s2'], 0)
 
 
 if __name__ == '__main__':

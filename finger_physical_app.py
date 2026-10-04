@@ -3,39 +3,22 @@
 Run from the repository root:
     streamlit run finger_physical_app.py
 
-Input: commanded motor/spool angle (0..180 degrees).
+Input: commanded motor/spool angle (limits set in finger_parameters.py).
 States: actual spool angle, finger angle and finger angular velocity.
-The fixed demonstration parameters are collected in FingerParameters. The
+All editable parameters are collected in finger_parameters.py. The
 existing routed Tendon supplies stretch, tension and geometry-dependent torque.
 Importing this file does not launch the UI; FingerModel can be used on its own.
 """
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 import time
 
 import numpy as np
 
+from finger_parameters import FingerParameters
 from tass_minimum.tass.models.tendon import Tendon
-
-
-@dataclass(frozen=True)
-class FingerParameters:
-    proximal_length_m: float = 0.15
-    distal_length_m: float = 0.10
-    spool_radius_m: float = 0.006
-    joint_inertia_kg_m2: float = 2e-4
-    joint_damping_Nm_s_rad: float = 0.002
-    return_spring_Nm_rad: float = 0.080
-    tendon_stiffness_N_m: float = 2500.0
-    tendon_damping_Ns_m: float = 0.1
-    tendon_slack_m: float = 0.0
-    tendon_preload_N: float = 0.0
-    servo_time_constant_s: float = 0.10
-    servo_speed_limit_deg_s: float = 300.0
-    motor_limit_deg: float = 180.0
-    joint_limit_deg: float = 100.0
-    max_step_s: float = 0.0005
+from tass_minimum.tass.models.spring import LinearReturnSpring
 
 
 @dataclass
@@ -50,7 +33,8 @@ class FingerModel:
     """Stateful finger driven only by a motor position command.
 
     phi_dot = clip((u-phi)/tau, -speed_limit, speed_limit)
-    J*q_ddot = -T*L'(q) - k_s*q - b*q_dot
+    F_s = k_s*max(0, spring_length(q)-spring_free_length)
+    J*q_ddot = -T*L'(q) - F_s*spring_length'(q) - b*q_dot
 
     T follows the shared unilateral elastic/damped tendon law. Joint stops at
     0 and joint_limit_deg remove outward velocity and support outward torque.
@@ -60,15 +44,20 @@ class FingerModel:
     def __init__(self, parameters=None):
         self.parameters = parameters or FingerParameters()
         p = self.parameters
+        joint = np.array([p.proximal_length_m, 0.0])
         self.tendon = Tendon(
+            rest_length=p.tendon_rest_length_m,
             k=p.tendon_stiffness_N_m, c=p.tendon_damping_Ns_m,
             slack=p.tendon_slack_m, preload=p.tendon_preload_N,
-            joint_position=(p.proximal_length_m, 0.0),
-            p1=(p.proximal_length_m*4/15, 0.005),
-            p2=(p.proximal_length_m*0.8, 0.005),
-            p3=(p.proximal_length_m + p.distal_length_m*0.25, 0.005),
-            p4=(p.proximal_length_m + p.distal_length_m*0.8, 0.005),
+            joint_position=joint, spool_position=p.spool_position_m,
+            p1=p.tendon_p1_m, p2=p.tendon_p2_m,
+            p3=joint+p.tendon_p3_offset_m, p4=joint+p.tendon_p4_offset_m,
+            load_cell=joint+p.load_cell_offset_m,
         )
+        self.spring = LinearReturnSpring(
+            stiffness_N_m=p.spring_stiffness_N_m, free_length_m=p.spring_free_length_m,
+            fixed_offset_m=p.spring_fixed_offset_m, moving_offset_m=p.spring_moving_offset_m,
+            joint_position=joint)
         self.state = FingerState()
         self.motor_target_rad = 0.0
 
@@ -89,7 +78,8 @@ class FingerModel:
         )
         moment_arm = -float(self.tendon.path_length_derivative(s.joint_angle_rad))
         tendon_torque = moment_arm*float(tension)
-        spring_torque = -p.return_spring_Nm_rad*s.joint_angle_rad
+        spring = self.spring.evaluate(s.joint_angle_rad)
+        spring_torque = float(spring['torque_Nm'])
         damping_torque = -p.joint_damping_Nm_s_rad*s.joint_velocity_rad_s
         net_torque = tendon_torque + spring_torque + damping_torque
         at_lower_stop = s.joint_angle_rad <= 0.0 and s.joint_velocity_rad_s <= 0.0
@@ -102,9 +92,10 @@ class FingerModel:
             "extension_m": float(extension),
             "extension_velocity_m_s": float(extension_rate),
             "tension_N": float(tension),
+            "load_cell_force_N": float(tension),  # Ideal inline reading; no added compliance.
             "moment_arm_m": moment_arm,
             "tendon_torque_Nm": tendon_torque,
-            "spring_torque_Nm": spring_torque,
+            **{f"spring_{name}": float(value) for name, value in spring.items()},
             "damping_torque_Nm": damping_torque,
             "stop_reaction_Nm": reaction,
             "joint_acceleration_rad_s2": (net_torque+reaction)/p.joint_inertia_kg_m2,
@@ -155,6 +146,7 @@ class FingerModel:
             "span_1_m": float(spans["p1_p2"]),
             "span_2_m": float(spans["p3_p4"]),
             "span_3_m": float(spans["p2_p3"]),
+            "load_cell_tail_m": float(spans["p4_load_cell"]),
             "tip_x_m": float(tip[0]),
             "tip_y_m": float(tip[1]),
         })
@@ -169,7 +161,24 @@ def finger_svg(model):
     """
     s, p, tendon = model.state, model.parameters, model.tendon
     r = model.readouts()
-    scale, base_x, base_y = 1550.0, 235.0, 475.0
+    # Fit the configured geometry over its complete joint travel. These are
+    # screen-layout bounds, not physical dimensions or simulation parameters.
+    angles = np.linspace(0.0, math.radians(p.joint_limit_deg), 65)
+    joint = tendon.joint_position
+    envelope = np.vstack((
+        (0.0, 0.0), joint, tendon.p1, tendon.p2,
+        tendon.spool_position + (-p.spool_radius_m, -p.spool_radius_m),
+        tendon.spool_position + (p.spool_radius_m, p.spool_radius_m),
+        tendon.rotate_about_joint(joint + (p.distal_length_m, 0.0), angles),
+        tendon.rotate_about_joint(tendon.p3_reference, angles),
+        tendon.rotate_about_joint(tendon.p4_reference, angles),
+        tendon.load_cell_position(angles),
+        model.spring.attachment_positions(angles)[0],
+        model.spring.attachment_positions(angles)[1],
+    ))
+    low, high = envelope.min(axis=0), envelope.max(axis=0)
+    scale = min(1550.0, 402.0/(high[0]-low[0]), 225.0/(high[1]-low[1]))
+    base_x, base_y = 190.0-scale*low[1], 487.0+scale*low[0]
 
     def screen(point):
         x, y = point
@@ -190,7 +199,7 @@ def finger_svg(model):
     parts = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 560" role="img" aria-labelledby="finger-title finger-description" style="width:100%;height:auto;display:block">',
         '<title id="finger-title">Live tendon-driven finger</title>',
-        '<desc id="finger-description">Two rigid finger segments, four routing points, a motor spool and three tendon spans. The span crossing the joint shortens as the finger bends.</desc>',
+        '<desc id="finger-description">Two finger segments, four sliding guides, a tendon ending at a distal load cell, and a linear extension spring between brackets opposite the tendon.</desc>',
         '<defs><pattern id="grid" width="31" height="31" patternUnits="userSpaceOnUse"><path d="M31 0H0V31" fill="none" stroke="#1c2a3e" stroke-width="0.7"/></pattern></defs>',
         '<rect width="720" height="560" rx="18" fill="#0e1728"/>',
         '<rect x="16" y="16" width="688" height="528" rx="12" fill="url(#grid)"/>',
@@ -203,21 +212,35 @@ def finger_svg(model):
         line(np.array([0, 0]), joint, '#8294af', 1, 'stroke-dasharray="3 8"'),
         f'<circle cx="{jx}" cy="{jy}" r="20" fill="#142136" stroke="#a6bedc" stroke-width="2"/>',
     ]
-    # A small torsion-spring symbol at the joint, anchored to the proximal link.
-    spring = []
-    for angle in np.linspace(0, 4*math.pi, 90):
-        radius = 4 + angle/(4*math.pi)*10
-        spring.append(f'{jx+radius*math.cos(angle):.2f},{jy+radius*math.sin(angle):.2f}')
-    parts.append(f'<polyline points="{" ".join(spring)}" fill="none" stroke="#f5cd78" stroke-width="1.7"/>')
-    colors = ['#8191a9', '#4cd5ca', '#ffb667', '#b69aff']
-    points = [tendon.spool_position, *guides]
+    # Linear spring between the two bracket tips. Both mounts use the same
+    # attachment geometry as the force law, with segment 2's bracket rotating.
+    fixed, moving = model.spring.attachment_positions(s.joint_angle_rad)
+    fixed_root = joint + np.array([p.spring_fixed_offset_m[0], 0.0])
+    moving_root = tendon.rotate_about_joint(joint+np.array([p.spring_moving_offset_m[0], 0.0]), s.joint_angle_rad)
+    parts.extend([line(fixed_root, fixed, '#8294af', 6), line(moving_root, moving, '#8294af', 6)])
+    start, end = np.array(screen(fixed)), np.array(screen(moving))
+    direction = end-start
+    normal = np.array([-direction[1], direction[0]])/np.linalg.norm(direction)
+    spring_points = [start]
+    for i, fraction in enumerate(np.linspace(0.15, 0.85, 13)):
+        spring_points.append(start+fraction*direction + (4 if i % 2 else -4)*normal)
+    spring_points.append(end)
+    vertices = ' '.join(f'{x:.2f},{y:.2f}' for x, y in spring_points)
+    parts.append(f'<polyline points="{vertices}" fill="none" stroke="#f5cd78" stroke-width="2"/>')
+    load_cell = tendon.load_cell_position(s.joint_angle_rad)
+    colors = ['#8191a9', '#4cd5ca', '#ffb667', '#b69aff', '#65baff']
+    points = [tendon.spool_position, *guides, load_cell]
     for i, color in enumerate(colors):
         extra = 'stroke-dasharray="4 5"' if r['tension_N'] < 1e-6 else ''
         parts.append(line(points[i], points[i+1], color, 3.5, extra))
     for i, guide in enumerate(guides, start=1):
         x, y = screen(guide)
         parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5" fill="#0e1728" stroke="#eff5ff" stroke-width="2"/>')
-        parts.append(text(x+11, y+4, f'P{i}' + (' · anchor' if i == 4 else ''), '#eff5ff', 11))
+        parts.append(text(x+11, y+4, f'P{i} · guide' if i == 4 else f'P{i}', '#eff5ff', 11))
+    # The load cell rotates rigidly with segment 2; the tendon ends here.
+    lc_x, lc_y = screen(load_cell)
+    parts.append(f'<rect x="{lc_x-14:.2f}" y="{lc_y-6:.2f}" width="28" height="12" rx="2" fill="#65baff" stroke="#eff5ff" transform="rotate({r["joint_angle_deg"]:.2f} {lc_x:.2f} {lc_y:.2f})"/>')
+    parts.append(text(lc_x+20, lc_y-12, 'Load cell · anchor', '#65baff', 11))
     # Spool at its actual fixed feed point; the spoke rotates with actual phi.
     sx, sy = screen(tendon.spool_position)
     radius = scale*p.spool_radius_m
@@ -233,7 +256,8 @@ def finger_svg(model):
         text(390, 112, f'Rotates · {p.distal_length_m*1000:.0f} mm'),
         text(35, 198, 'FINGER ANGLE', '#a7b5c8', 11),
         text(35, 231, f'{r["joint_angle_deg"]:.1f}°', '#eff5ff', 29, 'font-weight="700"'),
-        text(35, 253, 'Return spring at joint', '#f5cd78', 11),
+        text(35, 275, 'Linear return spring', '#f5cd78', 11),
+        text(35, 292, f'{r["spring_force_N"]:.2f} N · {r["spring_length_m"]*1000:.1f} mm', '#f5cd78', 11),
     ])
     # Angle arc in the flexion direction, independent of the tendon line.
     if s.joint_angle_rad > 0.005:
@@ -246,8 +270,9 @@ def finger_svg(model):
         ('Span 1 · along segment 1', r['span_1_m'], colors[1]),
         ('Span 2 · along segment 2', r['span_2_m'], colors[3]),
         ('Span 3 · across joint', r['span_3_m'], colors[2]),
+        ('P4 → load cell', r['load_cell_tail_m'], colors[4]),
     ]):
-        y = 373+index*42
+        y = 342+index*40
         parts.append(f'<rect x="438" y="{y-8}" width="20" height="3" rx="1" fill="{color}"/>')
         parts.append(text(470, y, label, color, 11))
         parts.append(text(470, y+16, f'{length*1000:.2f} mm', '#eff5ff', 13))
@@ -261,16 +286,24 @@ def run_app():
 
     st.set_page_config(page_title="TASS · Finger mechanics", page_icon="🦾", layout="wide")
     st.title("Finger mechanics")
-    st.caption("One motor input · one moving joint · three routed tendon spans")
+    st.caption("One motor input · load-cell tendon anchor · linear return spring")
+    try:
+        parameters = FingerParameters()
+    except (ValueError, TypeError) as exc:
+        st.error(f"Check finger_parameters.py: {exc}")
+        st.stop()
 
     def reset_model():
-        st.session_state.finger_model = FingerModel()
+        st.session_state.finger_model = FingerModel(parameters)
         st.session_state.motor_target_deg = 0.0
         st.session_state.finger_paused = False
         st.session_state.finger_last_tick = time.monotonic()
-        st.session_state.finger_history = deque(maxlen=240)
+        st.session_state.finger_history = deque(maxlen=parameters.history_samples)
+        st.session_state.finger_model_version = 3
+        st.session_state.finger_parameter_snapshot = asdict(parameters)
 
-    if "finger_model" not in st.session_state:
+    if ("finger_model" not in st.session_state or st.session_state.get('finger_model_version') != 3
+            or st.session_state.get('finger_parameter_snapshot') != asdict(parameters)):
         reset_model()
 
     def apply_target():
@@ -289,7 +322,7 @@ def run_app():
         st.session_state.finger_paused = not st.session_state.finger_paused
         st.session_state.finger_last_tick = time.monotonic()
 
-    @st.fragment(run_every=0.1)
+    @st.fragment(run_every=parameters.display_interval_s)
     def live_panel():
         model = st.session_state.finger_model
         now = time.monotonic()
@@ -298,19 +331,21 @@ def run_app():
         if not st.session_state.finger_paused:
             # Bound catch-up work after an inactive browser tab. The simulation
             # clock shows time actually integrated, never discarded wall time.
-            model.advance(min(0.1, max(0.0, elapsed)))
+            model.advance(min(model.parameters.max_frame_simulation_s, max(0.0, elapsed)))
         r = model.readouts()
 
         controls, diagram, states = st.columns([1.05, 2.15, 1.0], gap="large")
         with controls:
             st.subheader("Motor control")
-            st.slider("Commanded motor angle (°)", 0.0, 180.0, step=1.0,
+            st.slider("Commanded motor angle (°)", 0.0, float(model.parameters.motor_limit_deg),
+                      step=float(model.parameters.motor_slider_step_deg),
                       key="motor_target_deg", on_change=apply_target)
             a, b = st.columns(2)
-            a.button("−10° Unwind", key="unwind", on_click=change_target,
-                     kwargs={"delta": -10.0}, use_container_width=True)
-            b.button("+10° Wind", key="wind", type="primary", on_click=change_target,
-                     kwargs={"delta": 10.0}, use_container_width=True)
+            button_step = model.parameters.motor_button_step_deg
+            a.button(f"−{button_step:g}° Unwind", key="unwind", on_click=change_target,
+                     kwargs={"delta": -button_step}, use_container_width=True)
+            b.button(f"+{button_step:g}° Wind", key="wind", type="primary", on_click=change_target,
+                     kwargs={"delta": button_step}, use_container_width=True)
             st.button("Release to 0°", key="release", on_click=change_target,
                       kwargs={"target": 0.0}, use_container_width=True)
             st.button("Hold motor here", key="hold", on_click=change_target,
@@ -336,9 +371,11 @@ def run_app():
             st.caption(f"Command: {r['motor_target_deg']:.1f}° · speed: {r['motor_velocity_deg_s']:.1f}°/s")
             st.metric("Finger angle", f"{r['joint_angle_deg']:.1f}°")
             st.caption(f"Speed: {r['joint_velocity_deg_s']:.1f}°/s")
-            st.metric("Tendon tension", f"{r['tension_N']:.2f} N")
+            st.metric("Load cell / tendon tension", f"{r['load_cell_force_N']:.2f} N")
             st.metric("Tendon stretch", f"{max(0, r['extension_m'])*1000:.2f} mm")
             st.metric("Tendon torque", f"{r['tendon_torque_Nm']:.3f} N·m")
+            st.metric("Linear spring force", f"{r['spring_force_N']:.2f} N")
+            st.caption(f"Length: {r['spring_length_m']*1000:.2f} mm · stretch: {r['spring_extension_m']*1000:.2f} mm")
 
         history = st.session_state.finger_history
         if not history or r['time_s'] > history[-1]['Time (s)']:
@@ -359,6 +396,7 @@ def run_app():
                     ('Finger speed', r['joint_velocity_deg_s'], 'deg/s'),
                     ('Finger acceleration', r['joint_acceleration_deg_s2'], 'deg/s²'),
                     ('Tendon tension', r['tension_N'], 'N'),
+                    ('Ideal load-cell force', r['load_cell_force_N'], 'N'),
                     ('Wound tendon length', r['wound_length_m']*1000, 'mm'),
                     ('Signed tendon extension', r['extension_m']*1000, 'mm'),
                     ('Extension rate', r['extension_velocity_m_s']*1000, 'mm/s'),
@@ -367,9 +405,14 @@ def run_app():
                     ('Span 1 length', r['span_1_m']*1000, 'mm'),
                     ('Span 2 length', r['span_2_m']*1000, 'mm'),
                     ('Span 3 length', r['span_3_m']*1000, 'mm'),
+                    ('P4 to load cell', r['load_cell_tail_m']*1000, 'mm'),
                     ('Effective moment arm', r['moment_arm_m']*1000, 'mm'),
                     ('Tendon torque', r['tendon_torque_Nm'], 'N·m'),
                     ('Return spring torque', r['spring_torque_Nm'], 'N·m'),
+                    ('Linear spring length', r['spring_length_m']*1000, 'mm'),
+                    ('Linear spring extension', r['spring_extension_m']*1000, 'mm'),
+                    ('Linear spring force', r['spring_force_N'], 'N'),
+                    ('Spring geometric moment arm', r['spring_moment_arm_m']*1000, 'mm'),
                     ('Joint damping torque', r['damping_torque_Nm'], 'N·m'),
                     ('Stop reaction torque', r['stop_reaction_Nm'], 'N·m'),
                     ('Tip x (model frame)', r['tip_x_m']*1000, 'mm'),
@@ -378,11 +421,16 @@ def run_app():
             ])
 
     live_panel()
-    with st.expander("Fixed physical model"):
-        st.write("A servo winds the tendon around a 6 mm spool. Two rigid finger segments are 150 mm and 100 mm long. P1–P3 guide the sliding tendon; P4 anchors it to the moving segment. The 80 mm and 55 mm link spans stay fixed, while the span across the joint changes length.")
-        st.latex(r"\delta = r_s\phi + L(\theta)-L(0),\quad \tau_t=-T\,L'(\theta)")
-        st.latex(r"J\ddot\theta=\tau_t-k_s\theta-b\dot\theta,\qquad u(t)=\phi_{\mathrm{command}}(t)")
-        st.caption("Demonstration values: tendon stiffness 2500 N/m, tendon damping 0.1 N·s/m, return spring 0.080 N·m/rad, joint damping 0.002 N·m·s/rad, inertia 0.0002 kg·m². Joint travel 0–100°; motor travel 0–180°; servo time constant 0.10 s and speed limit 300°/s. Initial slack and preload are zero. Parameters are fixed in FingerParameters at the top of this file.")
+    with st.expander("Model parameters and equations"):
+        st.write("P1–P4 are sliding guides. The tendon continues past P4 to the load cell on segment 2. A linear extension spring connects brackets on the opposite side of the joint. Its length and moment arm change with finger angle. The load-cell reading equals tendon tension for the ideal frictionless, rigid-attachment model.")
+        st.latex(r"\delta = r_s\phi + L(\theta)-L(0)-\delta_{\mathrm{slack}}+T_0/k_t,\quad \tau_t=-T\,L'(\theta)")
+        st.latex(r"F_s=k_s\max(0,\ell_s(\theta)-\ell_{s0}),\quad \tau_s=-F_s\ell_s'(\theta)")
+        st.latex(r"J\ddot\theta=\tau_t+\tau_s-b\dot\theta,\qquad u(t)=\phi_{\mathrm{command}}(t)")
+        st.caption("Edit finger_parameters.py to change all model settings: segment lengths, piezo/idler-guide positions, load cell, spring, tendon material, inertia, damping and motor limits. Save and rerun/refresh the app; changed settings reset the simulation. Values are placeholders until measured on your prototype.")
+        material_mode = "measured override" if parameters.tendon_stiffness_override_N_m is not None else "E × A / L₀"
+        st.write(f"Effective tendon stiffness: **{parameters.tendon_stiffness_N_m:g} N/m** ({material_mode}).")
+        st.caption("Spring preload comes from choosing a free length shorter than the initial bracket separation. Piezo positions specify the mechanical guide locations; no acoustic model is included.")
+        st.json(asdict(st.session_state.finger_model.parameters), expanded=False)
         st.caption("Frictionless guides and a straight, unobstructed joint span are assumed. No external load or gravity is applied. Tendon tension cannot be negative. No acoustic model runs in this app.")
 
 

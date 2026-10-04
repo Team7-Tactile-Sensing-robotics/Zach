@@ -18,10 +18,13 @@ class TendonTests(unittest.TestCase):
         spans = tendon.path_segments(q)
         np.testing.assert_allclose(spans["p1_p2"], 0.080, atol=1e-14)
         np.testing.assert_allclose(spans["p3_p4"], 0.055, atol=1e-14)
+        np.testing.assert_allclose(spans["p4_load_cell"], 0.020, atol=1e-14)
         length_45 = np.hypot(0.030 + 0.020/np.sqrt(2), 0.030/np.sqrt(2) - 0.005)
         np.testing.assert_allclose(spans["p2_p3"], [0.055, length_45, np.hypot(0.025, 0.020)], atol=1e-14)
         self.assertTrue(np.all(np.diff(tendon.joint_displacement(q)) > 0))
-        np.testing.assert_allclose(tendon.guide_path_coordinates(q)[:, -1], tendon.path_length(q))
+        np.testing.assert_allclose(tendon.guide_path_coordinates(q)[:, -1]+0.020, tendon.path_length(q))
+        self.assertEqual(tendon.guide_path_coordinates(q).shape, (3, 4))
+        self.assertTrue(np.all(tendon.guide_path_ratios(q)[:, -1] < 1))
 
     def test_virtual_work_and_analytic_derivative(self):
         tendon = Tendon()
@@ -60,9 +63,20 @@ class TendonTests(unittest.TestCase):
         moved = Tendon(q0=0.2, spool_position=tendon.spool_position+offset,
                        joint_position=tendon.joint_position+offset,
                        p1=tendon.p1+offset, p2=tendon.p2+offset,
-                       p3=tendon.p3_reference+offset, p4=tendon.p4_reference+offset)
+                       p3=tendon.p3_reference+offset, p4=tendon.p4_reference+offset,
+                       load_cell=tendon.load_cell_reference+offset)
         np.testing.assert_allclose(moved.path_length(q+0.2), tendon.path_length(q), atol=1e-14)
         np.testing.assert_allclose(moved.joint_torque(q+0.2, 4), tendon.joint_torque(q, 4), atol=1e-14)
+
+    def test_load_cell_tail_changes_path_but_not_moment_arm(self):
+        first = Tendon()
+        second = Tendon(load_cell=(0.27, 0.005))
+        q = np.linspace(0, 1.7, 20)
+        np.testing.assert_allclose(second.path_length(q)-first.path_length(q), 0.020)
+        np.testing.assert_allclose(second.path_length_derivative(q), first.path_length_derivative(q))
+        np.testing.assert_allclose(second.joint_displacement(q), first.joint_displacement(q), atol=1e-14)
+        distances = np.linalg.norm(first.load_cell_position(q)-first.guide_positions(q)[3], axis=-1)
+        np.testing.assert_allclose(distances, 0.020)
 
     def test_invalid_geometry_and_slack(self):
         for args in ({"p1": (np.nan, 0)}, {"p3": (0.12, 0.005)}, {"slack": -1}, {"k": 0}):

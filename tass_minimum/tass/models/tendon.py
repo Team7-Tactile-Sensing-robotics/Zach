@@ -1,7 +1,8 @@
 """Routed, frictionless tendon: two fixed spans and a straight joint-crossing span.
 
 P1/P2 are fixed to segment 1. P3/P4 rotate with segment 2 about the joint;
-P4 is the distal attachment. Reference coordinates describe the straight finger
+P4 is a sliding guide, followed by an attachment at the distal load cell.
+Reference coordinates describe the straight finger
 at q=q0, along +x, with positive flexion counter-clockwise. The spool position
 is an effective fixed feed point (spool tangency and guide wrap are neglected).
 """
@@ -13,7 +14,7 @@ class Tendon:
                  spool_position=(0.0, 0.0), joint_position=(0.15, 0.0),
                  p1=(0.040, 0.005), p2=(0.120, 0.005),
                  p3=(0.175, 0.005), p4=(0.230, 0.005),
-                 slack=0.0, preload=0.0):
+                 slack=0.0, preload=0.0, load_cell=(0.250, 0.005)):
         # rest_length is the effective unstretched compliant length. Initial
         # slack/preload are independent of the explicitly drawn path length.
         for name, value in (("rest_length", rest_length), ("k", k), ("c", c),
@@ -26,11 +27,14 @@ class Tendon:
         self.q0 = float(q0)
         for name, value in (("spool_position", spool_position), ("joint_position", joint_position),
                             ("p1", p1), ("p2", p2),
-                            ("p3_reference", p3), ("p4_reference", p4)):
+                            ("p3_reference", p3), ("p4_reference", p4),
+                            ("load_cell_reference", load_cell)):
             point = np.array(value, dtype=float, copy=True)
             if point.shape != (2,) or not np.all(np.isfinite(point)):
                 raise ValueError(f"{name} must contain two finite coordinates")
             setattr(self, name, point)
+        if np.linalg.norm(self.load_cell_reference-self.p4_reference) <= 1e-12:
+            raise ValueError("Load-cell attachment must be distinct from P4")
         self.reference_path_length = float(self.path_length(self.q0))
         self.path_length_derivative(self.q0)  # Reject a collapsed joint span.
         self.compute(self.q0, 0.0, 0.0, 0.0)
@@ -42,7 +46,7 @@ class Tendon:
                    c=a.damping_Ns_m, q0=config.joint.equilibrium_rad,
                    spool_position=g.spool_position_m, joint_position=config.joint.origin_xy_m,
                    p1=g.p1_m, p2=g.p2_m, p3=g.p3_m, p4=g.p4_m,
-                   slack=a.slack_m, preload=a.preload_N)
+                   slack=a.slack_m, preload=a.preload_N, load_cell=g.load_cell_m)
 
     def rotate_about_joint(self, point, q):
         dq = np.asarray(q) - self.q0
@@ -55,6 +59,9 @@ class Tendon:
                 self.rotate_about_joint(self.p3_reference, q),
                 self.rotate_about_joint(self.p4_reference, q))
 
+    def load_cell_position(self, q):
+        return self.rotate_about_joint(self.load_cell_reference, q)
+
     def path_segments(self, q):
         """Lengths in m; supports scalar angles or arrays of angles."""
         p3 = self.rotate_about_joint(self.p3_reference, q)
@@ -63,6 +70,7 @@ class Tendon:
             "p1_p2": np.full(np.shape(q), np.linalg.norm(self.p2 - self.p1)),
             "p2_p3": np.linalg.norm(p3 - self.p2, axis=-1),
             "p3_p4": np.full(np.shape(q), np.linalg.norm(self.p4_reference - self.p3_reference)),
+            "p4_load_cell": np.full(np.shape(q), np.linalg.norm(self.load_cell_reference - self.p4_reference)),
         }
 
     def path_length(self, q):
@@ -111,8 +119,9 @@ class Tendon:
         return -(self.tension if tension is None else np.asarray(tension))*self.path_length_derivative(q)
 
     def guide_path_coordinates(self, q):
-        """Distances along the drawn route; no acoustic mapping is imposed."""
-        return np.cumsum(np.stack(list(self.path_segments(q).values()), axis=-1), axis=-1)
+        """Distances to P1..P4; the load-cell attachment is beyond P4."""
+        spans = self.path_segments(q)
+        return np.cumsum(np.stack([spans[name] for name in ("spool_p1", "p1_p2", "p2_p3", "p3_p4")], axis=-1), axis=-1)
 
     def guide_path_ratios(self, q):
         return self.guide_path_coordinates(q) / np.expand_dims(self.path_length(q), -1)

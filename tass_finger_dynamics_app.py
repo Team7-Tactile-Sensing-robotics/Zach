@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from scipy.optimize import brentq
 from tass_minimum.tass.models.tendon import Tendon
+from tass_minimum.tass.models.spring import LinearReturnSpring
 
 # ============================================================
 # TASS Single-Joint Tendon-Driven Finger Dynamics Demonstrator
@@ -12,8 +13,8 @@ from tass_minimum.tass.models.tendon import Tendon
 #
 # Model:
 #   Joint dynamics:
-#       J*theta_ddot + b*theta_dot + k_s*theta
-#           = -L'(theta)*T - tau_ext
+#       J*theta_ddot + b*theta_dot = -L'(theta)*T + tau_s - tau_ext
+#       tau_s = -k_s*max(spring_length - free_length, 0)*spring_length'(theta)
 #
 #   Tendon extension:
 #       delta_t = r_s*phi + L(theta) - L(0) - slack + preload/k_t
@@ -36,7 +37,7 @@ from tass_minimum.tass.models.tendon import Tendon
 #   T              tendon tension [N]
 #   J              finger rotational inertia [kg*m^2]
 #   b              finger viscous damping [N*m*s/rad]
-#   k_s            return spring rotational stiffness [N*m/rad]
+#   k_s            linear return spring stiffness [N/m]
 #   k_t            effective tendon axial stiffness [N/m]
 #   -L'(theta)     geometry-dependent tendon moment arm [m]
 #   r_s            servo spool radius [m]
@@ -94,13 +95,13 @@ b = st.sidebar.number_input(
     format="%.4f",
 )
 k_s = st.sidebar.number_input(
-    "Return spring stiffness k_s [N·m/rad]",
-    min_value=0.001,
-    max_value=2.0,
-    value=0.080,
-    step=0.005,
-    format="%.3f",
+    "Linear return spring stiffness k_s [N/m]",
+    min_value=0.0,
+    max_value=5000.0,
+    value=500.0,
+    step=10.0,
 )
+spring_free_length = st.sidebar.number_input("Spring free length [mm]", min_value=1.0, value=24.0, step=1.0)/1000
 guide_offset = st.sidebar.slider(
     "Tendon guide offset from segment axis [mm]", 1.0, 20.0, 5.0, 0.5
 ) / 1000.0
@@ -127,7 +128,10 @@ preload = st.sidebar.number_input("Reference preload [N]", min_value=0.0, value=
 tendon = Tendon(k=k_t, c=c_t, slack=slack, preload=preload,
                 joint_position=(L1, 0.0),
                 p1=(L1*4/15, guide_offset), p2=(L1*p2_fraction, guide_offset),
-                p3=(L1 + L2*p3_fraction, guide_offset), p4=(L1 + L2*0.8, guide_offset))
+                p3=(L1 + L2*p3_fraction, guide_offset), p4=(L1 + L2*0.8, guide_offset),
+                load_cell=(L1 + L2, guide_offset))
+spring = LinearReturnSpring(stiffness_N_m=k_s, free_length_m=spring_free_length,
+                            joint_position=(L1, 0.0))
 
 st.sidebar.header("Servo dynamics")
 tau_servo = st.sidebar.slider(
@@ -179,7 +183,7 @@ def tendon_tension(phi, theta, omega=0.0, phi_dot=0.0):
 def static_equilibrium(phi_cmd):
     """
     Solve the quasi-static equilibrium numerically:
-        k_s*theta + tau_ext = -L'(theta)*T(theta, phi_cmd)
+        tau_tendon(theta, phi_cmd) + tau_spring(theta) - tau_ext = 0
 
     Returns:
         theta_eq [rad], T_eq [N]
@@ -187,7 +191,7 @@ def static_equilibrium(phi_cmd):
     tau_ext = F_ext * l_contact
 
     def net_torque(theta):
-        return tendon.joint_torque(theta, tendon_tension(phi_cmd, theta)) - k_s*theta - tau_ext
+        return tendon.joint_torque(theta, tendon_tension(phi_cmd, theta)) + spring.joint_torque(theta) - tau_ext
 
     # Follow the first stable balance from the straight-finger stop.
     if net_torque(0.0) <= 0:
@@ -244,7 +248,7 @@ def simulate(phi_cmd):
         theta_ddot = (
             tendon.joint_torque(theta[i], T)
             - b * omega[i]
-            - k_s * theta[i]
+            + spring.joint_torque(theta[i])
             - tau_ext
         ) / J
 
@@ -322,16 +326,27 @@ with left:
     ax.add_patch(spool)
     ax.scatter([spool_center[0]], [spool_center[1]], s=20)
 
-    # Draw exactly the route used for stretch and torque; P4 is the attachment.
+    # P4 remains a sliding guide; the route ends at the load cell on segment 2.
     guides = np.array(tendon.guide_positions(theta[-1]))[:, ::-1]
-    route = np.vstack((spool_center, guides))
-    labels = ["Spool feed", "Span 1", "Span 3 (joint)", "Span 2"]
+    load_cell = tendon.load_cell_position(theta[-1])[::-1]
+    route = np.vstack((spool_center, guides, load_cell))
+    labels = ["Spool feed", "Span 1", "Span 3 (joint)", "Span 2", "P4 to load cell"]
     for i, label in enumerate(labels):
         ax.plot(route[i:i+2, 0], route[i:i+2, 1], "--", linewidth=2, label=label)
     ax.scatter(guides[:, 0], guides[:, 1], s=30, zorder=6)
     for i, point in enumerate(guides, start=1):
-        ax.annotate(f"P{i}" + (" anchor" if i == 4 else ""), point,
+        ax.annotate(f"P{i}", point,
                     xytext=(5, 5), textcoords="offset points", fontsize=8)
+    ax.scatter(*load_cell, marker="s", s=80, zorder=7)
+    ax.annotate("Load cell / anchor", load_cell, xytext=(5, 5), textcoords="offset points", fontsize=8)
+    fixed, moving = np.array(spring.attachment_positions(theta[-1]))[:, ::-1]
+    normal = np.array([-(moving-fixed)[1], (moving-fixed)[0]])/np.linalg.norm(moving-fixed)
+    coil = [fixed]
+    for i, fraction in enumerate(np.linspace(0.15, 0.85, 13)):
+        coil.append(fixed+fraction*(moving-fixed)+(0.002 if i % 2 else -0.002)*normal)
+    coil.append(moving)
+    coil = np.array(coil)
+    ax.plot(coil[:, 0], coil[:, 1], color="goldenrod", label="Linear spring")
     ax.legend(fontsize=8, loc="upper left")
 
     # External force arrow, assumed normal to the distal segment.
@@ -445,19 +460,21 @@ st.dataframe(df, use_container_width=True, hide_index=True)
 st.subheader("Equations used by the app")
 
 st.latex(
-    r"J\ddot{\theta} + b\dot{\theta} + k_s\theta "
-    r"= -L'(\theta) T - \tau_{\mathrm{ext}}"
+    r"J\ddot{\theta} + b\dot{\theta} "
+    r"= -L'(\theta) T + \tau_s - \tau_{\mathrm{ext}}"
 )
 st.write(
     "**Variables:** "
     "θ = finger joint angle [rad]; "
     "J = joint rotational inertia [kg·m²]; "
     "b = joint viscous damping [N·m·s/rad]; "
-    "k_s = return-spring rotational stiffness [N·m/rad]; "
+    "τ_s = torque from the linear spring between the bracket attachments [N·m]; "
     "−L′(θ) = tendon moment arm from guide geometry [m]; "
     "T = tendon tension [N]; "
     "τ_ext = external contact torque [N·m]."
 )
+st.latex(r"F_s=k_s\max(0,\ell_s-\ell_{s0}),\qquad \tau_s=-F_s\ell_s'(\theta)")
+st.caption("Spring stiffness is in N/m. Bracket offsets from the joint are (−12, −20) and (12, −20) mm in the straight pose; the second rotates with segment 2.")
 
 st.latex(
     r"\delta_t = r_s\phi + L(\theta)-L(0) - \delta_{\mathrm{slack}} + T_0/k_t"
@@ -510,6 +527,6 @@ st.write(
 st.info(
     "Demonstration parameters: replace guide coordinates, spool radius, stiffness, "
     "damping, inertia, and joint limits with measured prototype values. Guides are "
-    "frictionless, P4 anchors the tendon, and the joint span is straight and unobstructed. "
-    "P1 is at 26.7% of Segment 1 and P4 at 80% of Segment 2."
+    "frictionless, the tendon passes P4 and anchors at the distal load cell, and the joint span is straight and unobstructed. "
+    "P1 is at 26.7% of Segment 1 and P4 at 80% of Segment 2. Spring dimensions are demonstration values."
 )

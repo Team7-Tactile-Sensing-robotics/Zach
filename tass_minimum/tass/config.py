@@ -14,7 +14,6 @@ class Motor:
 @dataclass(frozen=True)
 class Joint:
     inertia_kg_m2: float = 2.0e-5
-    stiffness_Nm_rad: float = 0.25
     damping_Nm_s_rad: float = 0.004
     equilibrium_rad: float = 0.0
     distal_length_m: float = 0.1
@@ -23,12 +22,22 @@ class Joint:
 
 @dataclass(frozen=True)
 class TendonRouting:
-    """World coordinates at the straight reference angle; P4 anchors the tendon."""
+    """World coordinates at the straight pose; P1..P4 guide the tendon to a load cell."""
     spool_position_m: tuple[float, float] = (0.0, 0.0)
     p1_m: tuple[float, float] = (0.040, 0.005)
     p2_m: tuple[float, float] = (0.120, 0.005)
     p3_m: tuple[float, float] = (0.175, 0.005)
     p4_m: tuple[float, float] = (0.230, 0.005)
+    load_cell_m: tuple[float, float] = (0.250, 0.005)
+
+
+@dataclass(frozen=True)
+class ReturnSpring:
+    """Linear extension spring; joint-relative attachment offsets at the straight pose."""
+    stiffness_N_m: float = 500.0
+    free_length_m: float = 0.024
+    fixed_offset_m: tuple[float, float] = (-0.012, -0.020)
+    moving_offset_m: tuple[float, float] = (0.012, -0.020)
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,7 @@ class ModelConfig:
     joint: Joint = field(default_factory=Joint)
     axial: AxialTendon = field(default_factory=AxialTendon)
     tendon_routing: TendonRouting = field(default_factory=TendonRouting)
+    return_spring: ReturnSpring = field(default_factory=ReturnSpring)
     string: String = field(default_factory=String)
     contact: Contact = field(default_factory=Contact)
     piezo: Piezo = field(default_factory=Piezo)
@@ -109,8 +119,7 @@ class ModelConfig:
                             ("rtol", self.numerics.joint_rtol), ("atol", self.numerics.joint_atol),
                             ("joint max step", self.numerics.joint_max_step_s)]:
             positive(name, value)
-        for name, value in [("spring stiffness", self.joint.stiffness_Nm_rad),
-                            ("joint damping", self.joint.damping_Nm_s_rad),
+        for name, value in [("joint damping", self.joint.damping_Nm_s_rad),
                             ("axial damping", self.axial.damping_Ns_m),
                             ("preload", self.axial.preload_N),
                             ("initial slack", self.axial.slack_m),
@@ -137,6 +146,8 @@ class ModelConfig:
             raise ValueError("Joint origin and equilibrium must be finite")
         from .models.tendon import Tendon
         Tendon.from_config(self)  # Validate routing coordinates and reference span.
+        from .models.spring import LinearReturnSpring
+        LinearReturnSpring.from_config(self)
         n = len(self.piezo.positions_m)
         if n < 1 or len(self.piezo.gains) != n or len(self.piezo.noise_std_V) != n:
             raise ValueError("Piezo positions, gains and noise arrays must have equal nonzero length")
@@ -158,7 +169,7 @@ class ModelConfig:
     def load(cls, path):
         values = json.loads(Path(path).read_text())
         constructors = {"motor": Motor, "joint": Joint, "axial": AxialTendon,
-                        "tendon_routing": TendonRouting,
+                        "tendon_routing": TendonRouting, "return_spring": ReturnSpring,
                         "string": String, "contact": Contact, "piezo": Piezo, "numerics": Numerics}
         unknown = values.keys() - constructors.keys()
         if unknown:
@@ -166,5 +177,9 @@ class ModelConfig:
         if "moment_arm_m" in values.get("joint", {}):
             values["joint"].pop("moment_arm_m")
             warnings.warn("joint.moment_arm_m is obsolete; configure tendon_routing for the new geometry model.",
+                          UserWarning, stacklevel=2)
+        if "stiffness_Nm_rad" in values.get("joint", {}):
+            values["joint"].pop("stiffness_Nm_rad")
+            warnings.warn("joint.stiffness_Nm_rad is obsolete; configure the linear return_spring and its attachments.",
                           UserWarning, stacklevel=2)
         return cls(**{key: constructors[key](**value) for key, value in values.items()}).validate()

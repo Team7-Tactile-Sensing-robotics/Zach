@@ -1,13 +1,15 @@
 # Verification record
 
-Routed tendon update checked on 2026-09-24. Tests use Python's built-in
+Load-cell attachment and linear bracket spring checked on 2026-09-30. Tests use Python's built-in
 `unittest` runner: `python -m unittest discover -s tests -v`.
 
-All 23 tests pass. A full CLI coupled run with `config/default.json` also
-completed successfully. The Streamlit app was checked at 0°, 90°, and 180° motor
-commands, including its guide-route schematic and operating-point table.
-At the app's default settings, 90° motor rotation settles at 44.2° finger flexion
-and 4.15 N tendon tension; 180° settles at 73.6° and 5.07 N.
+All 28 package tests and 7 finger-app model tests pass. Run the latter from the
+repository root with `python -m unittest discover -s tests -v`.
+The finger-only app's default 90° motor command settles at 40.66° finger flexion,
+6.39 N tendon/load-cell force and 6.20 N spring force; 180° settles at 74.68°,
+4.08 N tendon/load-cell force and 9.67 N spring force. These are demonstration
+predictions, not measurements. Changing moment arms make tension non-monotonic
+in motor angle for this particular geometry.
 
 The committed `test-results.txt` and output plots are historical records from
 2026-09-23, before routed mechanics replaced the constant moment arm. The acoustic
@@ -38,7 +40,7 @@ are correctly undefined.
 ## Test coverage
 
 - Equilibrium with zero tension and zero load.
-- Convergence to the nonlinear balance `-T*L'(theta) = k_joint*(theta-theta_0)`
+- Convergence to the nonlinear balance `-T*L'(theta) = F_s*spring_length'(theta)`
   with measured tension, using an independent closed-form bridge geometry.
 - Convergence with opposing contact torque `r_contact*F_contact`.
 - Coupled elastic-tendon static equilibrium and nonnegative tension.
@@ -50,6 +52,13 @@ are correctly undefined.
 - Measured and custom tension laws both use the routed joint moment arm.
 - Routing configuration roundtrip, legacy-field warning, invalid geometry,
   reference-pose world coordinates, and mechanical output channels.
+- Tendon continues beyond P4 to the load cell; its added rigid span changes
+  path length but not shortening or the joint moment arm.
+- Linear spring lengths and forces against closed-form geometry, torque against
+  the energy gradient and the attachment force cross product, preload, slack,
+  coordinate transforms and invalid parameters.
+- Finger-app return to straight, rate-limited motor, hold behavior, stop reaction,
+  editable load-cell/spring measurements and generated SVG pose/labels.
 - Full-span fundamental obtained from a numerical ringdown FFT.
 - Frequency ratio when tension changes from 2 N to 8 N.
 - Contact positions at 20% and 40% of length, including exact zero motion at
