@@ -92,6 +92,9 @@ class Inputs:
     contact_force_N: Signal = field(default_factory=Constant)
     tension_N: Signal | None = field(default_factory=lambda: Constant(4.0))
 
+    # Explicit forces in N; omitted pairs are off. None uses the selected demo exciter.
+    actuator_forces_N: dict[str, Signal] | None = None
+
     def sample(self, time_s):
         result = {}
         for name in ("motor_angle_rad", "excitation_N", "contact_force_N", "tension_N"):
@@ -104,4 +107,14 @@ class Inputs:
             if name in {"contact_force_N", "tension_N"} and np.any(values < 0):
                 raise ValueError(f"{name} must be nonnegative under the V1 sign convention")
             result[name] = values
+        if self.actuator_forces_N is not None:
+            names = ("pair1", "pair2", "pair3", "pair4")
+            if set(self.actuator_forces_N) - set(names):
+                raise ValueError("Actuator IDs must be pair1, pair2, pair3 or pair4")
+            drives = np.column_stack([
+                [self.actuator_forces_N.get(name, Constant(0))(float(t)) for t in time_s]
+                for name in names])
+            if drives.shape != (len(time_s), 4) or not np.all(np.isfinite(drives)):
+                raise ValueError("Actuator forces must be finite scalar signals")
+            result["actuator_forces_N"] = drives
         return result

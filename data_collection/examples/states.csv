@@ -1,0 +1,5 @@
+trial_id,time_s,source_id,contact_active,contact_force_N,contact_segment,contact_position_m,tendon_contact_position_m,tension_N,joint_angle_rad,motor_command_rad,motor_angle_rad,quality_flag
+SYNTHETIC_baseline_001,0,DEMO_synchronized_DAQ,0,0,,,,2,0.4,0.5,0.5,ok
+SYNTHETIC_baseline_001,0.001,DEMO_synchronized_DAQ,0,0,,,,2,0.4,0.5,0.5,ok
+SYNTHETIC_contact_001,0,DEMO_synchronized_DAQ,1,1,2,0.06,,6,0.4,0.8,0.8,ok
+SYNTHETIC_contact_001,0.001,DEMO_synchronized_DAQ,1,1,2,0.06,,6,0.4,0.8,0.8,ok

@@ -1,5 +1,7 @@
 # TASS minimum analytical model
 
+> For installation, the interactive app, and the integrated routed modal sweep, see the [project quickstart](README.md). The equations below describe the legacy time-domain reference workflow (`routed_pairs.enabled=false`). The default JSON presets now enable four routed actuator/sensor pairs; see the project quickstart for their input and geometry conventions.
+
 A runnable Python model of the V1 single-joint finger, based on the supplied
 **TASS Minimum Analytical Model** notes and **Team 7 Project Proposal**.
 
@@ -10,7 +12,50 @@ synthetic piezo voltage → frequency features.
 They have not been calibrated against your prototype. This is a forward simulator,
 not a trained contact-location or contact-force estimator.
 
+## Collect prototype data
+
+CSV templates and filled synthetic examples are in
+[`data_collection/`](data_collection/README.md). Use `trials.csv` for setup and
+trial targets, `waveforms.csv` for raw piezo/excitation samples, and `states.csv`
+for timestamped contact force/location, tendon tension, and encoder measurements.
+The guide defines units, clock alignment, missing values, and receiver mapping.
+These raw collection files require alignment before using the existing numeric
+measurement-processing interface.
+
 ## Run it
+
+For the finger-only interactive app, run from the repository root:
+
+```bash
+streamlit run finger_physical_app.py
+```
+
+This app requires Streamlit, NumPy, and the existing package dependencies. It
+uses motor angle as its only physical input. Wind/unwind buttons, release, hold,
+and a motor-angle slider drive a persistent finger simulation with a live diagram
+and state readouts. Pause/resume freezes simulation time; reset restores the
+initial state. **Edit `finger_parameters.py` to adjust the entire finger app.**
+It groups segment lengths, P1–P4 piezo/idler-guide positions, load-cell location,
+linear spring stiffness/free length/attachments, tendon material constants,
+inertia, damping, motor/spool settings, and simulation/control settings.
+Coordinates and SI units are documented beside the values.
+
+Tendon stiffness is derived from `E*A/L0` using `tendon_young_modulus_Pa`,
+`tendon_area_m2`, and `tendon_rest_length_m`. The defaults preserve the previous
+2500 N/m stiffness. If you have a measured axial stiffness, set
+`tendon_stiffness_override_N_m`; leave it `None` to use the material constants.
+P1/P2 positions are measured from the base; P3/P4 and the load-cell and spring
+attachment offsets are measured from the joint in the straight pose. Positions
+and inertia are independent measurements, so changing a segment length does not
+rescale those values. The graphic fits the configured geometry automatically.
+
+Save changes and rerun/refresh the app. Changed settings reset the model and
+update the motor slider/button limits. The **Model parameters and equations**
+expander displays the active settings and effective tendon stiffness. All
+supplied values remain demonstration values. The separate batch/acoustic
+simulator below still uses `tass_minimum/config/default.json`.
+No acoustic solver runs. Its checks run with
+`python -m unittest discover -s tests -v` from the repository root.
 
 Requires Python 3.10 or later. Unzip the project and open a terminal in
 `tass_minimum/`:
@@ -53,14 +98,17 @@ The parameters most likely to change first are:
 | --- | --- | --- |
 | `motor.spool_radius_m` | Constant spool radius | 0.015 m |
 | `joint.origin_xy_m` | Joint center in world coordinates | [0.150, 0] m |
-| `tendon_routing` | Spool feed and P1–P4 reference coordinates | See routing below |
+| `tendon_routing` | Spool feed, P1–P4 guide and load-cell reference coordinates | See routing below |
+| `tendon_routing.load_cell_m` | Tendon attachment on the distal load cell | [0.250, 0.005] m |
 | `joint.distal_length_m` | Finger segment length | 0.100 m |
 | `joint.inertia_kg_m2` | Distal rotational inertia | 2e-5 kg m² |
-| `joint.stiffness_Nm_rad` | Return spring stiffness | 0.25 N m/rad |
+| `return_spring.stiffness_N_m` | Linear extension-spring stiffness | 500 N/m |
+| `return_spring.free_length_m` | Unstretched spring length | 0.024 m |
+| `return_spring.fixed_offset_m`, `moving_offset_m` | Joint-relative bracket attachments in the straight pose | [-0.012, -0.020], [0.012, -0.020] m |
 | `joint.damping_Nm_s_rad` | Viscous joint damping | 0.004 N m s/rad |
 | `axial.mode` | Tension source | `measured` |
-| `axial.young_modulus_Pa`, `area_m2`, `rest_length_m` | Define effective axial stiffness `EA/L0` | 10,000 N/m combined |
-| `axial.slack_m`, `preload_N` | Independent reference slack and preload offsets | 0 m; 0 N |
+| `axial.young_modulus_Pa`, `area_m2`, `rest_length_m` | Define effective axial stiffness `EA/L0` | approximately 4341.95 N/m combined |
+| `axial.slack_m` | Additional free-length allowance | 0 m |
 | `axial.damping_Ns_m` | Axial damping while taut | 0.05 N s/m |
 | `string.length_m` | Fixed vibrating span, independent of axial rest length | 0.120 m |
 | `string.linear_density_kg_m` | Mass per length | 0.002 kg/m |
@@ -118,25 +166,30 @@ distal segment counter-clockwise about that point.
 
 ```text
 s = r_motor * phi_motor
-L(theta) = |spool-P1| + |P1-P2| + |P2-P3(theta)| + |P3-P4|
+L(theta) = |spool-P1| + |P1-P2| + |P2-P3(theta)| + |P3-P4| + |P4-load_cell|
 shortening = L(theta_0) - L(theta)
 k_axial = EA/L0
-extension = s - shortening - slack + preload/k_axial
+free_length = L0 - s
+extension = L(theta) - free_length - slack
 extension_rate = s_dot + L_prime(theta)*theta_dot
 
 T = measured_load_cell_input
 or
 T = max(0, k_axial*extension + c_axial*extension_rate) if extension > 0 else 0
 
-I * theta_ddot = -L_prime(theta)*T - k_joint*(theta-theta_0)
+spring_length = |moving_attachment(theta) - fixed_attachment|
+F_spring = k_spring * max(0, spring_length - spring_free_length)
+tau_spring = -F_spring * d(spring_length)/dtheta
+
+I * theta_ddot = -L_prime(theta)*T + tau_spring
                 - b_joint*theta_dot - r_contact*F_contact
+load_cell_force = T  # ideal inline load cell, frictionless guides
 
 mu*y_tt + c_string*y_t - T*y_xx = F_excitation(t)*delta(x-x_exciter)
 V_i = gain_i * y(x_i)       [or gain_i * y_t(x_i)] + noise_i
 ```
 
-The elastic law returns zero tension when the tendon is slack, including its
-equivalent preload extension. In measured mode, the prescribed load-cell signal
+The elastic law returns zero tension when the tendon is slack. In measured mode, the prescribed load-cell signal
 drives joint dynamics directly: changing the motor command alone cannot change
 the prescribed tension. Use simulated mode for the complete motor-to-tension
 causal chain.
@@ -145,7 +198,7 @@ causal chain.
 
 `models/tendon.py` implements the shared `Tendon` model, used by both
 `models/mechanics.py` and the root-level `tass_finger_dynamics_app.py`.
-The route is `spool -> P1 -> P2 -> P3 -> P4`:
+The route is `spool -> P1 -> P2 -> P3 -> P4 -> load cell`:
 
 | Part | Default reference coordinates / length | Motion |
 | --- | --- | --- |
@@ -153,10 +206,14 @@ The route is `spool -> P1 -> P2 -> P3 -> P4`:
 | Span 1: P1–P2 | (40, 5) to (120, 5) mm | Fixed 80 mm along segment 1 |
 | Span 2: P3–P4 | (175, 5) to (230, 5) mm | Fixed 55 mm along segment 2 |
 | Span 3: P2–P3 | Across joint at (150, 0) mm | 55 mm straight; 32.02 mm at 90° flexion |
+| P4–load cell | (230, 5) to (250, 5) mm | Fixed 20 mm; tendon terminates at the load cell |
 
 P1/P2 are fixed in the world frame. P3/P4 rotate about the joint by
-`theta-theta_0`. P1–P3 are frictionless sliding guides, and P4 is the distal
-attachment. The spool coordinate is an effective fixed feed point; changing
+`theta-theta_0`. All four piezo/idler locations P1–P4 are frictionless sliding
+guides. P4 is **not** an anchor: the tendon continues to the load cell fixed to
+segment 2. This final span adds to total path length but not to its angle
+derivative, because both ends move rigidly together. The ideal load-cell reading
+equals tendon tension; its compliance, electronics, and noise are not modeled. The spool coordinate is an effective fixed feed point; changing
 spool tangency, guide wrap, joint-surface contact, and guide friction are not
 represented. The connecting span must remain straight and unobstructed.
 A collapsed P2–P3 span is rejected because its force direction is undefined.
@@ -169,12 +226,12 @@ the old constant `joint.moment_arm_m`. Older JSON files containing that field
 load with a warning and discard it; update their joint origin and routing
 coordinates explicitly before comparing results.
 
-Slack and preload are independent reference offsets: extension at zero winding
-in the straight pose is `preload/k_axial - slack`. Do not use `rest_length_m` to
-set initial slack. That parameter is the effective compliant length used in
-`EA/L0`; it is not forced to equal the drawn route. Existing package material
-values are retained (10,000 N/m); the app has its own editable stiffness and
-actuator settings. The model has uniform axial tension and no axial inertia.
+Rest length is the physical unstretched tendon length at zero winding. The
+new default is 0.23031128874149276 m, matching the straight reference route.
+Extension at zero winding is `L(theta_0) - rest_length_m - slack_m`. Pretension
+comes from shorter rest length or initial winding, not an independent preload
+parameter. Stiffness remains `EA/L0`, now about 4341.95 N/m with the default
+material and area. The model has uniform axial tension and no axial inertia.
 
 The app draws the same route with swapped display axes to show an upright finger.
 From the repository root, run `streamlit run tass_finger_dynamics_app.py` (requires
@@ -228,7 +285,7 @@ Every CLI simulation writes:
 
 | File | Contents |
 | --- | --- |
-| `timeseries.csv` | Time, motor command, winding displacement/velocity/acceleration, each routed span length, total path length, shortening, moment arm, tendon torque, joint angle/velocity/acceleration, tension, contact force/location/state, contact and tip world coordinates, excitation, piezo voltages |
+| `timeseries.csv` | Time, motor command, winding displacement/velocity/acceleration, each routed span length, total path length, shortening, moment arm, tendon torque, load-cell force, linear spring length/extension/force/moment arm/torque, joint angle/velocity/acceleration, tension, contact force/location/state, contact and tip world coordinates, excitation, piezo voltages |
 | `string_state.npz` | Complete `time_s`, `grid_m`, `displacement_m`, `velocity_m_s` arrays |
 | `spectrum.csv`, `spectrum.npz` | Frequency, voltage amplitude, excitation amplitude, complex approximate FRF, valid-bin mask |
 | `features.json` | Dominant frequency, peak amplitude, spectral peaks, spectral energy and channel amplitude ratio |
@@ -321,7 +378,7 @@ zero-input, static equilibrium, contact-force equilibrium, string-frequency,
 tension-scaling and contact-location requirements, plus elastic coupling,
 force normalization, fixed boundaries and the common data/processing interface.
 Routing checks cover constant link spans, cross-joint shortening, the analytical
-path derivative, virtual work, stretch rate, slack/preload, coordinate transforms,
+path derivative, virtual work, stretch rate, physical slack and initial tension, coordinate transforms,
 and nonlinear static equilibrium.
 
 For the saved baseline (`L=0.12 m`, `T=4 N`, `mu=0.002 kg/m`), the first three

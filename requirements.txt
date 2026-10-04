@@ -1,0 +1,4 @@
+# All runtime dependencies for the simulator and interactive app
+-r tass_minimum/requirements.txt
+mujoco
+matplotlib

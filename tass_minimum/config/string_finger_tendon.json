@@ -1,9 +1,9 @@
 {
   "motor": {
-    "spool_radius_m": 0.015
+    "spool_radius_m": 0.005
   },
   "joint": {
-    "stiffness_Nm_rad": 0.08,
+    "stiffness_Nm_rad": 0.25,
     "inertia_kg_m2": 2e-05,
     "damping_Nm_s_rad": 0.004,
     "equilibrium_rad": 0.0,
@@ -16,36 +16,36 @@
   "axial": {
     "mode": "simulated",
     "young_modulus_Pa": 2000000000.0,
-    "area_m2": 5e-07,
-    "rest_length_m": 0.21043479108399377,
-    "damping_Ns_m": 0.05,
+    "area_m2": 6.25e-08,
+    "rest_length_m": 0.25,
+    "damping_Ns_m": 0.1,
     "slack_m": 0.0
   },
   "tendon_routing": {
     "spool_position_m": [
-      0.03,
+      0.0,
       0.0
     ],
     "p1_m": [
       0.04,
-      0.015
+      0.005
     ],
     "p2_m": [
       0.12,
-      0.015
+      0.005
     ],
     "p3_m": [
       0.175,
-      0.015
+      0.005
     ],
     "p4_m": [
       0.23,
-      0.015
+      0.005
     ]
   },
   "string": {
     "length_m": 0.12,
-    "linear_density_kg_m": 0.002,
+    "linear_density_kg_m": 0.0005,
     "distributed_damping_Ns_m2": 0.008,
     "nodes": 81,
     "exciter_position_m": 0.024,
@@ -93,11 +93,11 @@
   },
   "experiment": {
     "scenario": "baseline",
-    "motor_initial_rad": 0.0,
-    "motor_final_rad": 1.1112333593982764,
-    "baseline_motor_angle_rad": 0.1868317788428849,
+    "motor_initial_rad": 0.12,
+    "motor_final_rad": 0.18,
+    "baseline_motor_angle_rad": null,
     "measured_tension_N": 4.0,
-    "contact_force_N": 0.0,
+    "contact_force_N": 0.4,
     "excitation_amplitude_N": 0.002,
     "pulse_start_s": 0.002,
     "pulse_width_s": 0.0005,
@@ -154,14 +154,14 @@
     "inertia_kg_m2": 0.0002,
     "joint_damping_Nm_s_rad": 0.002,
     "spring_stiffness_Nm_rad": 0.08,
-    "guide_offset_mm": 15.0,
+    "guide_offset_mm": 5.0,
     "p1_fraction": 0.26666666666666666,
     "p2_percent": 80,
     "p3_percent": 25,
     "p4_fraction": 0.8,
     "spool_radius_mm": 6.0,
     "tendon_stiffness_N_m": 2500.0,
-    "tendon_rest_length_m": 0.21043479108399377,
+    "tendon_rest_length_m": 0.23031128874149276,
     "tendon_damping_Ns_m": 0.1,
     "slack_mm": 0.0,
     "servo_time_constant_s": 0.1,
@@ -201,9 +201,9 @@
     ]
   },
   "spring": {
-    "mode": "extension",
+    "mode": "torsional",
     "free_length_m": null,
-    "relaxed_angle_rad": -0.17453292519943295,
+    "relaxed_angle_rad": null,
     "stiffness_N_m": 250.0,
     "base_anchor_m": [
       0.13,

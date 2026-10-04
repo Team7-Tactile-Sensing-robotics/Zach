@@ -1,7 +1,10 @@
 __pycache__/
+<<<<<<< HEAD
 *.py[cod]
 .venv/
 *.egg-info/
 build/
 dist/
 outputs/
+=======
+>>>>>>> origin/zach-dev
