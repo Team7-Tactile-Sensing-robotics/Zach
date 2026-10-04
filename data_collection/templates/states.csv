@@ -1,0 +1,1 @@
+trial_id,time_s,source_id,contact_active,contact_force_N,contact_segment,contact_position_m,tendon_contact_position_m,tension_N,joint_angle_rad,motor_command_rad,motor_angle_rad,quality_flag

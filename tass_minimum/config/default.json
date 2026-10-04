@@ -4,7 +4,6 @@
   },
   "joint": {
     "inertia_kg_m2": 2e-05,
-    "stiffness_Nm_rad": 0.25,
     "damping_Nm_s_rad": 0.004,
     "equilibrium_rad": 0.0,
     "distal_length_m": 0.1,
@@ -40,7 +39,23 @@
     ],
     "p4_m": [
       0.23,
-      0.015
+      0.005
+    ],
+    "load_cell_m": [
+      0.25,
+      0.005
+    ]
+  },
+  "return_spring": {
+    "stiffness_N_m": 500.0,
+    "free_length_m": 0.024,
+    "fixed_offset_m": [
+      -0.012,
+      -0.02
+    ],
+    "moving_offset_m": [
+      0.012,
+      -0.02
     ]
   },
   "string": {

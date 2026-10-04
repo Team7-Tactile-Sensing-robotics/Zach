@@ -16,6 +16,13 @@ from tass.io import save_measurement, load_measurement
 
 class MechanicsTests(unittest.TestCase):
     @staticmethod
+    def spring_torque(q, config):
+        # Closed form for opposite-side bracket offsets (+/-12, -20) mm.
+        length = 2*(0.012*np.cos(q/2)+0.020*np.sin(q/2))
+        arm = -0.012*np.sin(q/2)+0.020*np.cos(q/2)
+        return -config.return_spring.stiffness_N_m*max(0, length-config.return_spring.free_length_m)*arm
+
+    @staticmethod
     def bridge_length_and_arm(q):
         # Independent closed form for the supplied P2/P3 coordinates:
         # P2=(-a,h), P3=(b,h) relative to the joint at reference.
@@ -39,14 +46,14 @@ class MechanicsTests(unittest.TestCase):
     def test_static_equilibrium(self):
         config, result = self.run_mechanics(4, 0)
         expected = brentq(lambda q: self.bridge_length_and_arm(q)[1]*4
-                          - config.joint.stiffness_Nm_rad*q, 0, 1)
+                          + self.spring_torque(q, config), 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
 
     def test_contact_force_equilibrium(self):
         config, result = self.run_mechanics(4, 0.4)
         expected = brentq(lambda q: self.bridge_length_and_arm(q)[1]*4
                           - config.contact.finger_lever_arm_m*0.4
-                          - config.joint.stiffness_Nm_rad*q, 0, 1)
+                          + self.spring_torque(q, config), 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
 
     def test_simulated_tension_coupled_equilibrium(self):
@@ -54,11 +61,16 @@ class MechanicsTests(unittest.TestCase):
         j, k = config.joint, config.axial.stiffness_N_m
         def torque(q):
             length, arm = self.bridge_length_and_arm(q)
+<<<<<<< HEAD
             # Independent route: feed + segment 1 + joint bridge + segment 2.
             path = np.hypot(0.04, 0.005) + 0.08 + length + 0.055
             tension = k*max(0.0, path - (config.axial.rest_length_m-config.motor.spool_radius_m*0.12)
                             - config.axial.slack_m)
             return arm*tension - j.stiffness_Nm_rad*q
+=======
+            tension = k*max(0.0, config.motor.spool_radius_m*0.12 + length - 0.055)
+            return arm*tension + self.spring_torque(q, config)
+>>>>>>> origin/zach-dev
         expected = brentq(torque, 0, 1)
         self.assertAlmostEqual(result["joint_angle_rad"][-1], expected, places=7)
         self.assertTrue(np.all(result["tension_N"] >= 0))
