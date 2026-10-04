@@ -29,7 +29,7 @@ class TendonRouting:
     p1_m: tuple[float, float] = (0.040, 0.005)
     p2_m: tuple[float, float] = (0.120, 0.005)
     p3_m: tuple[float, float] = (0.175, 0.005)
-    p4_m: tuple[float, float] = (0.230, 0.005)
+    p4_m: tuple[float, float] = (0.220, 0.005)
 
 
 @dataclass(frozen=True)
