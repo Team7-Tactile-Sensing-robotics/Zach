@@ -353,3 +353,10 @@ the second mode, demonstrating why the strongest peak is not always the fundamen
 At 40% hard contact, the excited left span predicts **465.85 Hz**; the simulated
 peak is **464 Hz**. These checks validate the implementation against its own
 assumptions, not against experimental TASS measurements. See `docs/verification.md`.
+
+## Synchronized sensor, actuator, and mechanical dataset
+
+See the [root README generation and plotting guide](../README.md#generate-a-straight-finger-sweep-dataset)
+for copyable commands and output filenames. Run those commands from `Zach/`.
+See [data collection instructions](docs/dataset_channels.md) for column definitions,
+calibration assumptions, and loading examples.

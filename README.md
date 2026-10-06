@@ -318,7 +318,88 @@ For hardware/saved CSV processing:
 python -m tass --process-csv outputs/baseline_new/timeseries.csv --output outputs/reprocessed
 ```
 
-## First simulation dataset
+## Generate a straight-finger sweep dataset
+
+Run these commands from `Zach/` after installation. The physical model is in
+[`tass_minimum/config/default.json`](tass_minimum/config/default.json); the
+collection protocol is in
+[`dataset_straight_segments.json`](tass_minimum/config/experiments/dataset_straight_segments.json).
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+.venv/bin/python -m tass.dataset \
+  --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_straight_segments.json \
+  --output outputs/dataset_straight_chirp
+```
+
+Choose a **new, empty output directory** for every collection, including after a
+failed run. For example, replace the output with `outputs/dataset_straight_chirp_run2`
+if the first directory already contains files. Existing datasets are not overwritten.
+
+The protocol records 320 trials: four locations × four forces × 20 repeats.
+Each trial is one second at 48 kHz, with the joint held straight at 0 radians.
+Locations are 20%, 40%, 60%, and 80% of the combined physical segment lengths,
+measured from the finger base (0.05, 0.10, 0.15, and 0.20 m for a 0.25-m finger).
+Force classes are 1, 2, 5, and 10 N. All four actuators use a simultaneous linear
+20–2,000 Hz chirp with nominal 2-V peak amplitude; select `chirp_schedule: sequential`
+in the JSON protocol to excite one actuator per quarter-window instead.
+
+Outputs include:
+
+- `trials/trial_XXXX.npz`: synchronized sensor/actuator voltages, mechanical
+  channels, timestamps, labels, and metadata.
+- `manifest.csv`: trial IDs, contact conditions, seeds, checksums, and data splits.
+- `example_trial.csv`: the full first trial as a table.
+- `model_config.json` and `protocol.json`: the exact input snapshots.
+- `summary.json`: completion status and collection statistics.
+
+This is synthetic static-contact data. Servo angle is measured from zero spool
+winding, so it need not be zero when the joint is straight. Actuator voltage
+uses the protocol's demonstration force-per-volt gain. The current hard-contact
+model cannot distinguish force magnitudes at fixed-segment or joint contacts
+through tension changes alone. Model distances ending in `_m` are metres:
+`anchor_extension_m: 0.03` means 30 mm, whereas `30` means 30 metres.
+See [model assumptions and channel definitions](tass_minimum/docs/dataset_channels.md).
+
+## Plot and export a trial
+
+Use a zero-based trial number (0–319 for this protocol) and the same dataset
+folder used during generation:
+
+```bash
+.venv/bin/python plot_trial.py 12 --dataset outputs/dataset_straight_chirp
+```
+
+For the existing `dataset_straight_chirp_fixed` collection, the shortcut is:
+
+```bash
+.venv/bin/python plot_trial.py 12
+```
+
+The script reads saved data; it does not rerun the simulation. Results are saved
+under the selected dataset's `trial_exports/` directory:
+
+| File | Contents |
+| --- | --- |
+| `trial_0012.csv` | Every timestamp and the requested voltage/contact/servo values |
+| `trial_0012_piezo.png` | Four rows: actuator drive voltage on the left, corresponding sensor voltage on the right |
+| `trial_0012_mechanics.png` | Contact force/location, servo angle/torque, and recorded finger pose |
+
+The pose uses the saved model configuration, with +x pointing from base toward
+the fingertip and +y upward on the tendon side. It marks the spool, joint,
+P1–P4, spring attachments, and contact. A new export replaces the same trial's
+CSV/PNGs but leaves the source dataset unchanged.
+
+To choose a different export folder:
+
+```bash
+.venv/bin/python plot_trial.py 12 \
+  --dataset outputs/dataset_straight_chirp \
+  --output outputs/my_trial_plots
+```
+
+## First simulation dataset (legacy pulse protocol)
 
 The [Version 1 collection protocol](tass_minimum/docs/dataset_v1.md) specifies
 16 location/force conditions, 20 trials per condition, 1-second four-channel
