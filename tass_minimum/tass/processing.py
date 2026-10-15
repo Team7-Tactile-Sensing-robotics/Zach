@@ -16,7 +16,7 @@ class FrequencyResult:
 
 
 def extract_frequency_features(measurement: Measurement, *, start_s=None, end_s=None,
-                               window="hann", max_peaks=5, frf_floor_relative=1e-3):
+                                window="hann", max_peaks=5, frf_floor_relative=1e-3):
     """Single-record Y/U is approximate; only excited bins are reported.
 
     Choose a stationary interval for resonance interpretation. Pulse ringdown is

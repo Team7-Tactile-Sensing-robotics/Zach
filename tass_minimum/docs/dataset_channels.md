@@ -77,12 +77,15 @@ command is recorded even though its point force cannot move that boundary.
 From `Zach/`:
 
 ```bash
-.venv/bin/python plot_trial.py 12
+.venv/bin/python plot_trial.py 12 --dataset outputs/dataset_channels_v2
 ```
 
 Trial numbers are zero-based (0–319 for the 320-trial collection). This reads
 existing data and writes `outputs/dataset_channels_v2/trial_exports/trial_0012.csv`
-plus `trial_0012_piezo.png` and `trial_0012_mechanics.png`. The piezo figure
+plus `trial_0012_piezo.png`, `trial_0012_mechanics.png`, and
+`trial_0012_finger_upright.png`. The upright figure contains just the recorded
+finger diagram, rotated with the base at the bottom and fingertip at the top.
+The piezo figure
 has four rows with actuator drive on the left and the corresponding sensor on
 the right. The mechanics figure contains contact force/location, servo angle/torque
 and the static finger pose reconstructed from the saved model snapshot (+x along
@@ -134,27 +137,44 @@ is needed for force estimation across the whole finger. Do not add artificial
 joint torque on segment 1 to manufacture a signal. Pair 4's endpoint limitation
 and the existing pulse excitation are unchanged by this location convention.
 
-### Continuous active frequency sweep
+### Short frequency sweep followed by vibration decay
 
 The straight-segment protocol now selects a linear chirp:
 
 ```json
 "excitation_type": "chirp",
 "chirp_schedule": "simultaneous",
+"window_s": 1.5,
+"chirp_duration_s": 0.3,
 "chirp_start_Hz": 20.0,
 "chirp_end_Hz": 2000.0,
 "chirp_amplitude_V": 2.0,
 "chirp_ramp_s": 0.005
 ```
 
-All four channels sweep from 20 to 2000 Hz throughout the one-second window,
-with smooth 5-ms amplitude ramps at the start and end. Amplitude is peak
+All four channels sweep from 20 to 2000 Hz during the first 0.3 seconds,
+with smooth 5-ms amplitude ramps at the start and end. Drive is then exactly
+zero while sensors continue recording until 1.5 seconds (72,000 samples at
+48 kHz). The vibration solver preserves the motion at shutoff and integrates
+its subsequent decay; it does not reset sensor voltage. Sensor noise remains
+present, and the time needed to decay depends on model damping. Amplitude is peak
 bipolar voltage (nominal ±2 V), subject to the configured trial jitter.
 Force = voltage × actuator_force_per_volt_N_V. The saved drive voltage traces
 therefore describe the actual excitation supplied to the model.
 
+Edit `chirp_duration_s` to change actuation duration and `window_s` to change
+the total sensing duration in `config/experiments/dataset_straight_segments.json`.
+For 1.5 seconds of sensing after shutoff, use `window_s: 1.8` with
+`chirp_duration_s: 0.3`. These settings apply to the static dataset generator;
+`numerics.duration_s` and `app.duration_s` control other simulations.
+
 Set `chirp_schedule` to `sequential` to give each actuator a full frequency
-sweep in its own quarter-window. Simultaneous channels use the same phase and
+sweep in its own quarter-window. Each starts at the beginning of its slot and
+drives for `chirp_duration_s`, which must fit in `window_s / 4`. With the current
+settings, starts are 0, 0.375, 0.75 and 1.125 seconds and each drive lasts
+0.3 seconds. Omit `chirp_duration_s` or set it to `null` to fill the entire
+slot (or entire recording for simultaneous excitation), preserving older protocols.
+Simultaneous channels use the same phase and
 frequency trajectory: their combined response does not independently identify
 four actuator transfer functions. Use sequential sweeps for that experiment.
 Set `excitation_type` to `pulse` to restore the old pulse protocol; its existing
@@ -172,3 +192,15 @@ The plot script currently defaults to `outputs/dataset_straight_chirp_fixed`.
 Use `--dataset` to select a different saved collection. Servo angle is measured
 from zero spool winding, not from the straight finger pose. Joint angle zero
 and servo angle zero are independent references.
+
+Choose the plotted time interval separately from recording duration:
+
+```bash
+.venv/bin/python plot_trial.py 12 --dataset outputs/dataset_straight_chirp_decay \
+  --start-s 0.3 --end-s 1.5
+```
+
+This displays the decay and scales the vertical axes using visible samples.
+Omit the bounds to plot the full recording; the CSV always exports the full
+trial. Generate a new dataset into the selected folder before using this example.
+Changing a protocol does not change previously saved trials.
