@@ -25,6 +25,7 @@ class Protocol:
     fixed_force_lever_arm_m: float = 0.04
     excitation_type: str = 'pulse'
     chirp_schedule: str = 'simultaneous'  # Or sequential, one sweep per quarter-window.
+    chirp_duration_s: float | None = None  # Per actuator; None fills its recording slot.
     chirp_start_Hz: float = 20.0
     chirp_end_Hz: float = 2000.0
     chirp_amplitude_V: float = 2.0
@@ -70,7 +71,10 @@ class Protocol:
                 raise ValueError('chirp_schedule must be simultaneous or sequential')
             if not 0 < self.chirp_start_Hz < self.chirp_end_Hz < self.sample_rate_Hz/2:
                 raise ValueError('Chirp requires 0 < start < end < Nyquist frequency')
-            duration = self.window_s if self.chirp_schedule == 'simultaneous' else self.window_s/4
+            slot = self.window_s if self.chirp_schedule == 'simultaneous' else self.window_s/4
+            duration = self.chirp_duration_s if self.chirp_duration_s is not None else slot
+            if not np.isfinite(duration) or not 0 < duration <= slot:
+                raise ValueError('Chirp duration must be positive, finite and fit inside its recording slot')
             if not np.isfinite(self.chirp_amplitude_V) or self.chirp_amplitude_V <= 0:
                 raise ValueError('Chirp amplitude must be positive and finite')
             if not 0 <= self.chirp_ramp_s <= duration/2:
@@ -96,8 +100,9 @@ def actuator_drives(time, protocol, rng):
             drives[:, i] = np.where((phase>=0)&(phase<=1),
                 p.pulse_amplitude_N*variation*np.sin(np.pi*phase)**2, 0)
         else:
-            duration = p.window_s if p.chirp_schedule == 'simultaneous' else p.window_s/4
-            local = time if p.chirp_schedule == 'simultaneous' else time-i*duration
+            slot = p.window_s if p.chirp_schedule == 'simultaneous' else p.window_s/4
+            duration = p.chirp_duration_s if p.chirp_duration_s is not None else slot
+            local = time if p.chirp_schedule == 'simultaneous' else time-i*slot
             envelope = ((local >= 0)&(local < duration)).astype(float)
             if p.chirp_ramp_s > 0:
                 edge = np.clip(np.minimum(local, duration-local)/p.chirp_ramp_s, 0, 1)
@@ -211,6 +216,10 @@ def make_trial(config, protocol, location, target_force, seed, *, include_refere
         constrained_actuators=[i+1 for i,node in enumerate(actuator_nodes) if node in (0,len(grid)-1,contact_node)])
     metadata.update(excitation_type=p.excitation_type,
         chirp_schedule=p.chirp_schedule if p.excitation_type == "chirp" else None,
+        recording_window_s=p.window_s,
+        chirp_duration_s=(p.chirp_duration_s if p.chirp_duration_s is not None else
+            (p.window_s if p.chirp_schedule == 'simultaneous' else p.window_s/4))
+            if p.excitation_type == 'chirp' else None,
         location_reference=p.location_reference,
         contact_segment_nominal_m=physical_nominal,
         contact_segment_requested_m=physical_position,

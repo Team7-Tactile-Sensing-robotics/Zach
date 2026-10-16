@@ -360,12 +360,35 @@ failed run. For example, replace the output with `outputs/dataset_straight_chirp
 if the first directory already contains files. Existing datasets are not overwritten.
 
 The protocol records 320 trials: four locations × four forces × 20 repeats.
-Each trial is one second at 48 kHz, with the joint held straight at 0 radians.
+Each trial records 1.5 seconds at 48 kHz (72,000 samples), with the joint held
+straight at 0 radians. Actuators run for the first 0.3 seconds, then their
+drive is zero for the remaining 1.2 seconds while sensors capture vibration decay.
 Locations are 20%, 40%, 60%, and 80% of the combined physical segment lengths,
 measured from the finger base (0.05, 0.10, 0.15, and 0.20 m for a 0.25-m finger).
 Force classes are 1, 2, 5, and 10 N. All four actuators use a simultaneous linear
 20–2,000 Hz chirp with nominal 2-V peak amplitude; select `chirp_schedule: sequential`
 in the JSON protocol to excite one actuator per quarter-window instead.
+
+Edit these settings in `tass_minimum/config/experiments/dataset_straight_segments.json`
+before generating a new dataset:
+
+| Setting | Meaning | Current value |
+| --- | --- | --- |
+| `chirp_duration_s` | Actuation duration per channel; the full frequency sweep fits into this time | `0.3` seconds |
+| `window_s` | Total sensor recording duration, including actuation | `1.5` seconds |
+| `sample_rate_Hz` | Sensor and actuator samples per second | `48000` Hz |
+| `chirp_ramp_s` | Smooth amplitude ramp at each end of the actuation | `0.005` seconds |
+
+For **1.5 seconds after** a 0.3-second actuation, set `window_s` to `1.8`.
+For simultaneous excitation, `chirp_duration_s` must fit within `window_s`;
+for sequential excitation it must fit within `window_s / 4`. Sequential channels
+start at the beginning of each quarter-window and stop after `chirp_duration_s`.
+Omitting this setting (or using `null`) retains the full-slot sweep behavior.
+The sensors continue evolving after drive shutoff; the simulator does not
+reset their response. Decay depends on model damping, and voltage may settle
+to the configured sensor noise rather than exactly zero.
+Dataset timing uses these protocol settings, rather than `numerics.duration_s`
+or `app.duration_s` in the model configuration.
 
 Outputs include:
 
@@ -407,11 +430,17 @@ under the selected dataset's `trial_exports/` directory:
 | `trial_0012.csv` | Every timestamp and the requested voltage/contact/servo values |
 | `trial_0012_piezo.png` | Four rows: actuator drive voltage on the left, corresponding sensor voltage on the right |
 | `trial_0012_mechanics.png` | Contact force/location, servo angle/torque, and recorded finger pose |
+| `trial_0012_finger_upright.png` | Separate upright finger pose, with base at the bottom and fingertip at the top |
 
 The pose uses the saved model configuration, with +x pointing from base toward
 the fingertip and +y upward on the tendon side. It marks the spool, joint,
 P1–P4, spring attachments, and contact. A new export replaces the same trial's
 CSV/PNGs but leaves the source dataset unchanged.
+
+The upright figure includes only the finger diagram, with tendon guides,
+spool, spring, joint, and contact markers. It rotates the saved geometry 90°
+counterclockwise, placing the tendon on the left, and is exported automatically
+by the same command.
 
 To choose a different export folder:
 
@@ -420,6 +449,22 @@ To choose a different export folder:
   --dataset outputs/dataset_straight_chirp \
   --output outputs/my_trial_plots
 ```
+
+To plot only the decay, choose the figure's time interval in seconds:
+
+```bash
+.venv/bin/python plot_trial.py 12 \
+  --dataset outputs/dataset_straight_chirp \
+  --start-s 0.3 --end-s 1.5
+```
+
+Use `--start-s 0 --end-s 0.4` to inspect the excitation and shutoff, or omit
+both options to plot the entire recording. These options set the time range
+and rescale the vertical axes to the visible samples in both time-series figures;
+the exported CSV still contains the full trial. They cannot add time beyond
+the saved recording. Changing the protocol requires generating a new dataset;
+existing datasets, including the plot script's default collection, retain their
+original timing. Use `--dataset` to select the newly generated collection.
 
 ## First simulation dataset (legacy pulse protocol)
 
