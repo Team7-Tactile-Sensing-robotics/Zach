@@ -24,11 +24,15 @@ Each `trials/*.npz` contains these one-dimensional, sample-aligned arrays:
 | `contact_location_m` | Grid-snapped distance along tendon from spool/feed endpoint |
 | `contact_from_joint_reference_m` | Requested path distance from projected joint reference, before snapping |
 | `piezo_sensor_1_V` … `piezo_sensor_4_V` | Simulated sensor voltages |
+| `piezo_sensor_1_reference_V` … `piezo_sensor_4_reference_V` | Matched no-clamp simulated reference voltages |
+| `piezo_sensor_1_raw_adc` … `piezo_sensor_4_raw_adc` | Optional modeled ESP32 integer ADC counts |
+| `piezo_sensor_1_reference_raw_adc` … | Optional matched-reference integer ADC counts |
 | `piezo_actuator_1_V` … `piezo_actuator_4_V` | Equivalent applied voltage pulses under linear actuator assumption |
 | `piezo_actuator_1_force_N` … `piezo_actuator_4_force_N` | Forces actually used by vibration solver |
 | `servo_angle_rad` | Static spool angle (ideal direct drive) |
 | `servo_torque_Nm` | Ideal spool holding torque, tension × radius |
 | `string_tension_N` | Static axial tendon tension |
+| `load_cell_readout_N` | Ideal simulated inline load-cell target, currently equal to tendon tension |
 | `joint_angle_rad` | Held finger joint angle |
 | `spring_resisting_torque_Nm` | ReturnSpring resisting torque |
 
@@ -37,11 +41,22 @@ constant within each static trial. Servo torque excludes friction, gearing,
 servo inertia and motor limits. It is a required torque, not a measured or
 validated achievable motor output.
 
+The reference channels are a counterfactual rerun with the acoustic contact
+clamp removed while tension, actuator waveform, sensor gains, and initial rest
+state are held fixed. They isolate the modeled boundary-condition change for
+delta-frequency/amplitude features. They are not a simulated probe-approach
+sequence and do not capture tension or pose changes that may precede real
+contact. Hardware reference captures must be collected and matched explicitly.
+
 Actuator conversion is `force_N = gain_N_per_V * voltage_V`, configured by
 `actuator_force_per_volt_N_V`. The initial demonstration gain is 0.001 N/V for
 each channel, so a nominal 0.002-N pulse corresponds to 2 V. These are NOT
 calibrated voltages or a piezo impedance/capacitance model. Replace the gains
 with measured transfer data before comparing against hardware.
+
+See [ESP32 ADC observation and calibration](esp32_adc.md) for the optional raw
+count model. Physical voltage remains as a diagnostic; ML should explicitly use
+`raw_adc` when hardware inference receives counts.
 
 `example_trial.csv` is the entire first trial in a spreadsheet-ready table.
 `manifest.csv` contains one row per trial with target labels, actual force,

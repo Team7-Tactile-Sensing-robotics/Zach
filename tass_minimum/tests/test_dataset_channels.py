@@ -23,3 +23,13 @@ class RecordedChannelsTests(unittest.TestCase):
         for gains in ((1, 2), (0, 1, 1, 1), (float('nan'), 1, 1, 1)):
             with self.assertRaises(ValueError):
                 replace(Protocol(), actuator_force_per_volt_N_V=gains).validate()
+
+    def test_optional_no_contact_reference(self):
+        config = ModelConfig()
+        protocol = replace(Protocol(), window_s=0.16)
+        t, volts, drives, meta, reference = make_trial(
+            config, protocol, 0.4, 2, 17, include_reference=True)
+        self.assertEqual(reference.shape, volts.shape)
+        self.assertFalse(np.array_equal(reference, volts))
+        channels = recorded_channels(t, volts, drives, meta, protocol, reference)
+        np.testing.assert_array_equal(channels["piezo_sensor_1_reference_V"], reference[:, 0])

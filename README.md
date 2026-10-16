@@ -23,6 +23,28 @@ Alternatively, `python -m pip install -e './tass_minimum[app]'` installs both
 the package and all runtime dependencies in one command.
 All commands below start in `Zach/` with that environment activated.
 
+## Contact force/location ML baseline
+
+The shared simulation/real-capture feature pipeline and Linear/Ridge regression
+baseline are documented in the [simulation-to-real guide](tass_minimum/README.md#simulation-to-real-regression-baseline).
+From this repository root, the core commands are:
+
+```bash
+python -m tass.dataset --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_channels_v2.json \
+  --output outputs/dataset_channels_v2
+python -m tass.ml_cli extract --input outputs/dataset_channels_v2 \
+  --output outputs/ml_features
+python -m tass.ml_cli train --features outputs/ml_features \
+  --output outputs/ml_model
+python -m tass.ml_cli predict --model outputs/ml_model/model_bundle.pkl \
+  --input captures/new_capture.csv --output outputs/new_capture_predictions.csv
+```
+
+Simulation test metrics and held-out labeled real-capture metrics are reported
+separately. The model is not a demonstrated sim-to-real estimator until the
+latter evaluation exists.
+
 ## Spring–tendon actuation
 
 The default preset now models the three stages in the sketch: relaxed at -10°,

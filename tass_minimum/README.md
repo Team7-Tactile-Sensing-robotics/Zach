@@ -12,6 +12,144 @@ synthetic piezo voltage → frequency features.
 They have not been calibrated against your prototype. This is a forward simulator,
 not a trained contact-location or contact-force estimator.
 
+## Simulation-to-real regression baseline
+
+The first ML baseline predicts the continuous targets `contact_force_N` and
+`contact_location_m`. Real location labels must use the simulation protocol's
+recorded coordinate convention. The static generator does **not** simulate a
+load-cell readout: `string_tension_N` is an ideal state, not contact force or a
+measured load-cell channel. Contact labels, load-cell values, tension, and servo
+state are therefore never model inputs.
+
+From `tass_minimum/`, generate data, extract features, train Linear and Ridge
+regressors, and evaluate the held-out simulation trials:
+
+```bash
+python -m tass.dataset --config config/default.json \
+  --protocol config/experiments/dataset_channels_v2.json \
+  --output outputs/dataset_channels_v2
+python -m tass.ml_cli extract --input outputs/dataset_channels_v2 \
+  --output outputs/ml_features
+python -m tass.ml_cli train --features outputs/ml_features \
+  --output outputs/ml_model
+python -m tass.ml_cli evaluate --model outputs/ml_model/model_bundle.pkl \
+  --input outputs/dataset_channels_v2 \
+  --output outputs/ml_model/simulation_evaluation.json
+```
+
+The existing generator requires a new, empty output directory. Feature
+extraction preserves its complete-trial train/validation/test assignments, so
+adjacent samples never cross splits. The default uses one 1-second window and
+sensor 1 only. Use `--window-s`/`--stride-s` for other windows and repeated
+`--sensor-id` arguments to add sensors. Ridge alpha is selected by validation
+RMSE. The test report includes MAE, RMSE, and R² for the selected model and a
+training-mean baseline; it also records all Linear/Ridge validation results.
+
+For the current two-pair hardware, use the common subset of simulated channels:
+
+```bash
+python -m tass.ml_cli extract --input outputs/dataset_channels_v2 \
+  --output outputs/ml_features_2sensor \
+  --sensor-id 1 --sensor-id 2 --reference-features
+```
+
+Newly generated schema-2.1 simulation trials include
+`piezo_sensor_N_reference_V`, a matched no-clamp counterfactual at the same
+tension and excitation. `--reference-features` adds PSD peak amplitude,
+spectral SNR, dominant-frequency change, peak-amplitude change, and
+`(contact-reference)/reference` amplitude ratio. Older generated datasets do
+not contain this reference and must be regenerated before using the flag.
+
+Run inference on an unlabeled real capture with:
+
+```bash
+python -m tass.ml_cli predict --model outputs/ml_model/model_bundle.pkl \
+  --input captures/new_capture.csv \
+  --output outputs/new_capture_predictions.csv
+```
+
+For a held-out labeled real capture, use `evaluate` instead. That report is
+marked `domain: real` and remains separate from simulation metrics. Do not claim
+sim-to-real performance until this evaluation has been run on labeled captures.
+
+The capture CSV has one sample per row. It requires `time_s` plus either
+`piezo_sensor_1_voltage_v` or `piezo_sensor_1_raw_adc`. `segment_id` is strongly
+recommended (otherwise the filename is used). `sample_index` is identifier-only.
+`sample_rate_hz` is checked if present and otherwise derived from timestamps.
+Optional labels are `contact_force_N` and `contact_location_m`; multiple
+segments may share a file. Samples must be uniformly spaced within each segment.
+Reference-feature inference additionally requires sample-aligned
+`piezo_sensor_N_reference_voltage_v` (or `_reference_raw_adc`) columns. These
+should come from a matched pre-contact/reference acquisition using the same
+excitation and acquisition settings.
+
+Default predictors are sensor mean, standard deviation, RMS, peak-to-peak,
+dominant frequency, three band powers, and sample rate. Raw ADC is preferred
+when both counts and diagnostic voltage are present. `feature_provenance.json` identifies simulated voltage,
+calibrated real voltage, raw measured ADC, and derived features. A differential
+DAC voltage is marked derived, never direct-measured. A shared inference-time
+constant such as transmitter frequency can be added with
+`--context-column transmitter_frequency_hz`.
+
+Actuator commands are excluded by default: the simulator's actuator voltage is
+derived from force with an uncalibrated assumed gain and is not comparable to
+the hardware DAC schema yet. Add actuator inputs only after defining and
+calibrating a shared representation.
+
+The optional [ESP32 ADC observation model](docs/esp32_adc.md) produces integer
+`piezo_sensor_N_raw_adc` channels while retaining simulated volts. It requires an
+explicit mapping or paired calibration; no nominal `3.3/4095` conversion is used.
+The mapping can be supplied directly to `tass.dataset` with
+`--adc-resolution-bits`, `--adc-counts-per-volt`, and `--adc-zero-code`; no
+separate calibration file is required.
+
+Extraction writes `features.csv`, `feature_config.json`, `feature_order.json`,
+and `feature_provenance.json`. Training writes `model_bundle.pkl` (fitted
+scalers/models, feature order, targets, and configuration), `metrics.json`, and
+`splits.json`. Prediction writes identifiers, window times, and target estimates.
+
+Known limitations: the hard-clamp simulator has no load-cell electronics,
+contact compliance, calibrated ADC transfer parameters/domain randomization, or
+validated actuator transfer model. Some physical-location configurations make
+force unidentifiable, and pair 4 can be silent at the fixed endpoint. This is a
+pipeline baseline, not evidence of real-world accuracy.
+
+Equations 2–3 can be enabled for one ordered pair of sensors that observe the
+same mode on opposite contact spans:
+
+```bash
+python -m tass.ml_cli extract --input outputs/dataset_channels_v2_new \
+  --output outputs/ml_features_physics \
+  --sensor-id 1 --sensor-id 2 --reference-features --physics-features \
+  --physics-sensor-pair 1 2 --string-length-m 0.2230277564 \
+  --linear-density-kg-m 0.002 --mode-number 1
+```
+
+For contacted frequencies `f_left` and `f_right`, this computes
+`x_physics = L*f_right/(f_left+f_right)`. Each contacted span estimates
+`T+deltaT`; each full-length reference frequency independently estimates `T`,
+and their mean difference is `tendon_delta_tension_N`. Sensor order defines the
+origin of `x`. The mode number must describe all four selected peaks.
+
+`physics_confidence` is the equal-weight mean of four bounded `[0,1]` evidence
+scores: minimum contacted spectral SNR, mean absolute frequency change,
+reference-normalized amplitude change, and agreement of the two independent
+reference-tension estimates. Thresholds/scales are saved in `feature_config.json`.
+Confidence-weighted physics terms and `(1-confidence)`-weighted vibration-change
+terms are also emitted, allowing the linear baseline to implement the proposed
+high-confidence/low-confidence emphasis rather than merely receiving confidence
+as an unrelated column.
+The contacted left/right tension estimates cannot honestly measure consistency:
+after solving `x` from those same two frequencies they agree algebraically, so
+the independent reference estimates are used instead.
+
+These physics results are model inputs, not labels. Ground-truth
+`string_tension_N` is never substituted. Dominant-FFT-peak selection is not a
+mode tracker; incorrect mode identity, sensor/span ordering, nonuniform tension,
+or a compliant contact can invalidate the estimates. The example length is the
+current default routed acoustic length and must be replaced by measured geometry
+for hardware.
+
 ## Run it
 
 Requires Python 3.10 or later. Unzip the project and open a terminal in

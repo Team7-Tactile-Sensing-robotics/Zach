@@ -1,7 +1,7 @@
 """Reproducible static-contact synthetic dataset. Run python -m tass.dataset."""
 import argparse
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ from .config import ModelConfig
 from .models.tendon import Tendon
 from .models.spring import ReturnSpring
 from .static_vibration import static_response
+from .adc import ADCConfig, observe_adc
 
 
 @dataclass(frozen=True)
@@ -37,9 +38,11 @@ class Protocol:
     excitation_jitter_fraction: float = 0.03
     noise_std_V: float = 1e-5
     actuator_force_per_volt_N_V: tuple = (0.001, 0.001, 0.001, 0.001)
+    adc: dict = field(default_factory=lambda: asdict(ADCConfig()))
     seed: int = 20260929
 
     def validate(self):
+        ADCConfig(**self.adc).validate(self.sample_rate_Hz)
         gains = np.asarray(self.actuator_force_per_volt_N_V)
         if gains.shape != (4,) or not np.all(np.isfinite(gains)) or np.any(gains <= 0):
             raise ValueError('Four positive finite actuator force-per-volt gains required')
@@ -119,7 +122,7 @@ def project_to_route(point, route):
     return float(best[1])
 
 
-def make_trial(config, protocol, location, target_force, seed):
+def make_trial(config, protocol, location, target_force, seed, *, include_reference=False):
     p = protocol.validate()
     config.validate()
     tendon = Tendon.from_config(config)
@@ -191,6 +194,14 @@ def make_trial(config, protocol, location, target_force, seed):
         config.string.distributed_damping_Ns_m2,contact_node,positions,positions,drives,p.sample_rate_Hz)
     gains = np.asarray(config.routed_pairs.sensor_gains)*(1+rng.uniform(-p.gain_jitter_fraction,p.gain_jitter_fraction,4))
     volts = motion*gains+rng.normal(0,p.noise_std_V,motion.shape)
+    # No-clamp counterfactual at matched tension, excitation, gains and rest
+    # state. This isolates the acoustic boundary change; it is not a simulated
+    # probe-approach transient or a load-cell measurement.
+    reference_volts = None
+    if include_reference:
+        reference_motion, _ = static_response(grid,tension,config.string.linear_density_kg_m,
+            config.string.distributed_damping_Ns_m2,None,positions,positions,drives,p.sample_rate_Hz)
+        reference_volts = reference_motion*gains+rng.normal(0,p.noise_std_V,reference_motion.shape)
     metadata = dict(location_fraction=location,force_label_N=target_force,
         actual_force_N=float(force),contact_nominal_m=float(nominal),contact_requested_m=float(position),
         contact_snapped_m=float(grid[contact_node]),contact_from_joint_reference_m=float(position-joint_coordinate),
@@ -204,10 +215,12 @@ def make_trial(config, protocol, location, target_force, seed):
         contact_segment_nominal_m=physical_nominal,
         contact_segment_requested_m=physical_position,
         contact_location_reference=('finger_base_along_segments' if physical_position is not None else 'tendon_feed'))
-    return time,volts,drives,metadata
+    result = (time,volts,drives,metadata)
+    return (*result, reference_volts) if include_reference else result
 
 
-def recorded_channels(time, volts, drives, metadata, protocol):
+def recorded_channels(time, volts, drives, metadata, protocol, reference_volts=None,
+                      raw_adc=None, reference_raw_adc=None):
     """Synchronized channels; static equilibrium quantities repeat over time."""
     constant = lambda value: np.full(len(time), value, dtype=np.float64)
     channels = {"time_s": time,
@@ -219,11 +232,18 @@ def recorded_channels(time, volts, drives, metadata, protocol):
         "servo_angle_rad": constant(metadata["motor_angle_rad"]),
         "servo_torque_Nm": constant(metadata["servo_torque_Nm"]),
         "string_tension_N": constant(metadata["tension_N"]),
+        "load_cell_readout_N": constant(metadata["tension_N"]),
         "joint_angle_rad": constant(metadata["joint_angle_rad"]),
         "spring_resisting_torque_Nm": constant(metadata["spring_resisting_torque_Nm"])}
     voltage = drives/np.asarray(protocol.actuator_force_per_volt_N_V)
     for i in range(4):
         channels[f"piezo_sensor_{i+1}_V"] = volts[:, i]
+        if raw_adc is not None:
+            channels[f"piezo_sensor_{i+1}_raw_adc"] = raw_adc[:, i]
+        if reference_volts is not None:
+            channels[f"piezo_sensor_{i+1}_reference_V"] = reference_volts[:, i]
+        if reference_raw_adc is not None:
+            channels[f"piezo_sensor_{i+1}_reference_raw_adc"] = reference_raw_adc[:, i]
         channels[f"piezo_actuator_{i+1}_V"] = voltage[:, i]
         channels[f"piezo_actuator_{i+1}_force_N"] = drives[:, i]
     return channels
@@ -237,20 +257,33 @@ def generate(config, protocol, output):
         raise ValueError('Output directory must be empty; existing datasets are never overwritten')
     (output/'trials').mkdir()
     config.save(output/'model_config.json')
-    (output/'protocol.json').write_text(json.dumps(asdict(p),indent=2)+'\n')
+    protocol_snapshot=asdict(p)
+    protocol_snapshot['adc']=asdict(ADCConfig(**p.adc))
+    (output/'protocol.json').write_text(json.dumps(protocol_snapshot,indent=2)+'\n')
     schedule=[(l,f,repeat) for l in p.location_fractions for f in p.force_levels_N for repeat in range(p.trials_per_condition)]
     rng=np.random.default_rng(p.seed)
     rng.shuffle(schedule)
     seeds=rng.integers(0,2**32-1,len(schedule))
     rows=[]
     for index,((location,force,repeat),seed) in enumerate(zip(schedule,seeds)):
-        time,volts,drives,metadata=make_trial(config,p,location,force,int(seed))
+        time,volts,drives,metadata,reference_volts=make_trial(
+            config,p,location,force,int(seed),include_reference=True)
         trial_id=f'trial_{index:04d}'
         # Assign complete trials, balanced within every condition, never windows.
         split='train' if repeat < int(0.7*p.trials_per_condition) else ('validation' if repeat < int(0.85*p.trials_per_condition) else 'test')
         path=output/'trials'/f'{trial_id}.npz'
-        channels = recorded_channels(time, volts, drives, metadata, p)
+        adc_config = ADCConfig(**p.adc)
+        raw_adc = reference_raw_adc = None
+        if adc_config.enabled:
+            adc_rng = np.random.default_rng(int(seed) ^ 0xADC0DE)
+            raw_adc = observe_adc(volts, adc_config, p.sample_rate_Hz, adc_rng)
+            reference_raw_adc = observe_adc(reference_volts, adc_config, p.sample_rate_Hz, adc_rng)
+        channels = recorded_channels(time, volts, drives, metadata, p, reference_volts,
+                                     raw_adc, reference_raw_adc)
         np.savez_compressed(path,**channels,piezo_V=volts.astype('float32'),
+            reference_piezo_V=reference_volts.astype('float32'),
+            **({"piezo_raw_adc": raw_adc, "reference_piezo_raw_adc": reference_raw_adc}
+               if raw_adc is not None else {}),
             actuator_voltage_V=(drives/np.asarray(p.actuator_force_per_volt_N_V)).astype('float32'),
             actuator_force_N=drives.astype('float32'),
             location_class=np.int64(list(p.location_fractions).index(location)),force_class=np.int64(list(p.force_levels_N).index(force)),
@@ -269,7 +302,7 @@ def generate(config, protocol, output):
     summary=dict(status='complete',synthetic=True,trials=len(rows),conditions=len(p.location_fractions)*len(p.force_levels_N),
         shape_per_trial=[len(time),4],sample_rate_Hz=p.sample_rate_Hz,window_s=p.window_s,
         split_counts={name:sum(row['split']==name for row in rows) for name in ('train','validation','test')},
-        channel_names=list(channels),schema_version='2.0',
+        channel_names=list(channels),schema_version='2.2',adc_observation=asdict(ADCConfig(**p.adc)),
         actuator_force_per_volt_N_V=list(p.actuator_force_per_volt_N_V),
         labels=['location_class','force_class'],location_reference=p.location_reference,
         assumptions=['static held pose with motor winding adjusted for force torque balance','ideal hard contact on tendon',
@@ -277,6 +310,7 @@ def generate(config, protocol, output):
         'actuator voltage uses an uncalibrated linear force-per-volt conversion; no piezo electrical dynamics',
         'no handheld gauge dynamics','pair4 at fixed endpoint is silent unless anchor extension is measured',
         'synthetic jitter is illustrative, not experimentally calibrated',
+        'reference piezo channels are a no-clamp counterfactual at matched tension and excitation, not a probe-approach recording',
         'total_segment projects physical contact onto tendon; segment 1 force has no joint torque',
         'hard contact has no force-dependent compliance; fixed-segment force magnitude is not identifiable from this model'])
     (output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
@@ -288,8 +322,46 @@ def main():
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--protocol',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--adc-config',type=Path,
+                        help='JSON ADCConfig object; overrides protocol adc block')
+    parser.add_argument('--adc-resolution-bits',type=int,
+                        help='Enable ADC output with this explicit resolution')
+    parser.add_argument('--adc-counts-per-volt',type=float,
+                        help='Explicit affine voltage-to-code slope at ADC input')
+    parser.add_argument('--adc-zero-code',type=float,
+                        help='ADC code corresponding to zero conditioned input volts')
+    parser.add_argument('--adc-attenuation-db',type=float,
+                        help='Firmware attenuation metadata; does not set conversion slope')
+    parser.add_argument('--adc-analog-gain',type=float,default=1.0)
+    parser.add_argument('--adc-analog-offset-V',type=float,default=0.0)
+    parser.add_argument('--adc-voltage-noise-std-V',type=float,default=0.0)
+    parser.add_argument('--adc-code-noise-std',type=float,default=0.0)
+    parser.add_argument('--adc-highpass-Hz',type=float)
+    parser.add_argument('--adc-lowpass-Hz',type=float)
     args=parser.parse_args()
-    summary=generate(ModelConfig.load(args.config),Protocol(**json.loads(args.protocol.read_text())),args.output)
+    protocol_data=json.loads(args.protocol.read_text())
+    inline_adc = (args.adc_resolution_bits, args.adc_counts_per_volt, args.adc_zero_code)
+    if args.adc_config and any(value is not None for value in inline_adc):
+        parser.error('--adc-config cannot be combined with inline ADC mapping options')
+    if any(value is not None for value in inline_adc) and not all(value is not None for value in inline_adc):
+        parser.error('--adc-resolution-bits, --adc-counts-per-volt, and --adc-zero-code are required together')
+    if args.adc_config:
+        protocol_data['adc']=json.loads(args.adc_config.read_text())
+    elif all(value is not None for value in inline_adc):
+        protocol_data['adc']=asdict(ADCConfig(
+            enabled=True, resolution_bits=args.adc_resolution_bits,
+            attenuation_db=args.adc_attenuation_db,
+            voltage_to_code_gain_counts_per_V=args.adc_counts_per_volt,
+            zero_voltage_code=args.adc_zero_code,
+            analog_gain_V_per_V=args.adc_analog_gain,
+            analog_offset_V=args.adc_analog_offset_V,
+            voltage_noise_std_V=args.adc_voltage_noise_std_V,
+            code_noise_std_counts=args.adc_code_noise_std,
+            highpass_cutoff_Hz=args.adc_highpass_Hz,
+            lowpass_cutoff_Hz=args.adc_lowpass_Hz,
+            parameter_source='assumed',
+            notes='Explicit dataset CLI values; replace assumptions with measured calibration.'))
+    summary=generate(ModelConfig.load(args.config),Protocol(**protocol_data),args.output)
     print(json.dumps(summary,indent=2))
 
 
