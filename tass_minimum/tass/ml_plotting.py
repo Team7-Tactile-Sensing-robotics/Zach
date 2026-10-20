@@ -46,9 +46,29 @@ def plot_training_loss(report, stem):
                ylabel='Cross-entropy / log loss' if classification else f'Mean squared error [{unit}²]')
         ax.grid(alpha=.2)
         ax.legend(fontsize=8)
-    family = {'ridge':'Ridge','linear':'Linear'}.get(report.get('regressor_family'),'Linear/Ridge')
+    family = {'ridge':'Ridge','linear':'Linear','mlp':'MLP'}.get(report.get('regressor_family'),'Linear/Ridge')
     fig.suptitle('Training and validation loss — classifier comparison' if classification else
-                 f'Training and validation loss — {family} model comparison (no epochs)')
+                 f'Training and validation loss — {family} candidate comparison')
+    _save(fig,stem)
+
+
+def plot_mlp_training_loss(report,stem):
+    classification=report['task']=='classification'
+    targets=list(report['targets'])
+    fig,axes=plt.subplots(1,len(targets),figsize=(7*len(targets),4.8),squeeze=False,constrained_layout=True)
+    for ax,target in zip(axes[0],targets):
+        result=report['targets'][target]
+        selected=result['selected_model'];history=result['epoch_histories'][selected]
+        title,scale,unit=_target_label(target)
+        factor=1. if classification else scale**2
+        epochs=np.arange(1,history['epochs_run']+1)
+        ax.plot(epochs,np.asarray(history['training_loss'])*factor,label='Training',color='#2563eb')
+        ax.plot(epochs,np.asarray(history['validation_loss'])*factor,label='Validation',color='#e07a16')
+        ax.axvline(history['selected_epoch'],color='#555555',ls=':',label='Saved validation checkpoint')
+        ax.set(title=f'{title} — {selected}',xlabel='Training epoch',
+               ylabel='Cross-entropy / log loss' if classification else f'Mean squared error [{unit}²]')
+        ax.grid(alpha=.2);ax.legend(fontsize=8)
+    fig.suptitle('MLP training history — separate location and force networks')
     _save(fig,stem)
 
 

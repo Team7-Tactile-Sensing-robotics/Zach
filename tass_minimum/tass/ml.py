@@ -2,20 +2,25 @@
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
 import json
 import pickle
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import re
+import warnings
 
 import numpy as np
 from sklearn.dummy import DummyRegressor
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, confusion_matrix,
                              f1_score, log_loss, mean_absolute_error, mean_squared_error, r2_score)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.exceptions import ConvergenceWarning
 
 
 TARGETS = ("contact_force_N", "contact_location_m", "load_cell_readout_N")
@@ -550,15 +555,98 @@ def _fit_classifier(X, y, target):
     return chosen, classes, priors.tolist(), result
 
 
+def _fit_mlp(X, y, target, *, classification=False, max_epochs=600, patience=60, seed=42):
+    """Dense MLP on the 1-D feature vector; checkpoint on the existing validation split."""
+    classes=np.unique(y['train']).tolist() if classification else []
+    if classification and len(classes)<2:
+        raise ValueError(f'Classification requires at least two training classes for {target}')
+    targets={split:_class_indices(values,classes,target) for split,values in y.items()} if classification else y
+    candidates,training,validation,histories={},{},{},{}
+    for hidden in ((16,),(32,16)):
+        for alpha in (.0001,.01):
+            name=f'mlp_{"x".join(map(str,hidden))}_alpha_{alpha:g}'
+            options=dict(hidden_layer_sizes=hidden,activation='relu',solver='adam',alpha=alpha,
+                batch_size=min(32,len(X['train'])),learning_rate_init=.001,max_iter=1,
+                early_stopping=False,random_state=seed)
+            if classification:
+                estimator=MLPClassifier(**options)
+            else:
+                # Fit both target and input scales on training rows only. Returned
+                # predictions are restored to metres or newtons by this wrapper.
+                estimator=TransformedTargetRegressor(regressor=MLPRegressor(**options),
+                                                     transformer=StandardScaler())
+            step='classifier' if classification else 'regressor'
+            model=Pipeline([('scaler',StandardScaler()),(step,estimator)])
+            with warnings.catch_warnings():
+                # This first fit intentionally does just one epoch; subsequent
+                # partial_fit calls retain Adam state and perform one more each.
+                warnings.simplefilter('ignore',ConvergenceWarning)
+                model.fit(X['train'],targets['train'])
+            network=model.named_steps[step] if classification else model.named_steps[step].regressor_
+            scaled_X=model.named_steps['scaler'].transform(X['train'])
+            scaled_y=targets['train'] if classification else model.named_steps[step].transformer_.transform(
+                y['train'][:,None]).ravel()
+            history={'training_loss':[],'validation_loss':[],'selected_epoch':None}
+            best_loss=float('inf');best=None;stale=0
+            for epoch in range(1,max_epochs+1):
+                if epoch>1:
+                    network.partial_fit(scaled_X,scaled_y)
+                if classification:
+                    tr=_classification_metrics(targets['train'],model.predict_proba(X['train']))
+                    va=_classification_metrics(targets['validation'],model.predict_proba(X['validation']))
+                    loss_key='log_loss'
+                else:
+                    tr=_metrics(y['train'],model.predict(X['train']))
+                    va=_metrics(y['validation'],model.predict(X['validation']))
+                    loss_key='mse'
+                history['training_loss'].append(tr[loss_key])
+                history['validation_loss'].append(va[loss_key])
+                if va[loss_key]<best_loss:
+                    best_loss=va[loss_key];best=deepcopy(model);stale=0
+                    history['selected_epoch']=epoch
+                    training[name]=tr;validation[name]=va
+                else:
+                    stale+=1
+                if stale>=patience:
+                    break
+            history['epochs_run']=len(history['training_loss'])
+            histories[name]=history;candidates[name]=best
+    metric='log_loss' if classification else 'rmse'
+    selected=min(validation,key=lambda name:validation[name][metric])
+    chosen=candidates[selected]
+    result={'selected_model':selected,'training_candidates':training,
+        'validation_candidates':validation,'epoch_histories':histories,
+        'mlp_config':{'input':'flat feature vector','candidate_hidden_layers':[[16],[32,16]],
+            'activation':'relu','optimizer':'adam','learning_rate':.001,'max_epochs':max_epochs,
+            'patience':patience,'random_seed':seed,'checkpoint_split':'validation'}}
+    if classification:
+        priors=np.bincount(targets['train'],minlength=len(classes))/len(targets['train'])
+        result.update(classes=classes,
+            test=_classification_metrics(targets['test'],chosen.predict_proba(X['test'])),
+            test_prior_baseline=_classification_metrics(targets['test'],np.tile(priors,(len(targets['test']),1))))
+        return chosen,classes,priors.tolist(),result
+    dummy=np.full(len(y['test']),np.mean(y['train']))
+    result.update(test=_metrics(y['test'],chosen.predict(X['test'])),
+                  test_mean_baseline=_metrics(y['test'],dummy))
+    return chosen,result
+
+
 def train(feature_dir, output, alphas=(0.01, 0.1, 1.0, 10.0, 100.0), *, plots=True,
-          task="regression", regressor="auto"):
+          task="regression", regressor="auto", classifier="auto", mlp_max_epochs=600,
+          mlp_patience=60, mlp_seed=42):
     if task not in {"regression", "classification"}:
         raise ValueError("task must be regression or classification")
-    if regressor not in {"auto", "linear", "ridge"}:
-        raise ValueError("regressor must be auto, linear, or ridge")
+    if regressor not in {"auto", "linear", "ridge", "mlp"}:
+        raise ValueError("regressor must be auto, linear, ridge, or mlp")
+    if classifier not in {"auto", "mlp"}:
+        raise ValueError("classifier must be auto or mlp")
     if task == "classification" and regressor != "auto":
         raise ValueError("regressor selection applies only to regression")
-    if task == "regression" and regressor != "linear" and not alphas:
+    if task == "regression" and classifier != "auto":
+        raise ValueError("classifier selection applies only to classification")
+    if min(mlp_max_epochs,mlp_patience)<1 or type(mlp_max_epochs) is not int or type(mlp_patience) is not int:
+        raise ValueError('MLP max epochs and patience must be positive integers')
+    if task == "regression" and regressor in {"auto","ridge"} and not alphas:
         raise ValueError("Ridge regression requires at least one alpha")
     rows, features, config = read_feature_set(feature_dir)
     splits = {name: [row for row in rows if row["split"] == name] for name in ("train", "validation", "test")}
@@ -580,10 +668,19 @@ def train(feature_dir, output, alphas=(0.01, 0.1, 1.0, 10.0, 100.0), *, plots=Tr
               "simulation_only": all(r["source"] == "simulation" for r in rows), "targets": {}}
     if task == "regression":
         report["regressor_family"] = regressor
+    else:
+        report['classifier_family']=classifier
     for target in target_names:
         y = {name: _matrix(part, [target]).ravel() for name, part in splits.items()}
         if task == "classification":
-            models[target], class_values[target], class_priors[target], report["targets"][target] = _fit_classifier(X, y, target)
+            fitted=(_fit_mlp(X,y,target,classification=True,max_epochs=mlp_max_epochs,
+                patience=mlp_patience,seed=mlp_seed) if classifier=='mlp' else _fit_classifier(X,y,target))
+            models[target],class_values[target],class_priors[target],report['targets'][target]=fitted
+            continue
+        if regressor == 'mlp':
+            models[target],report['targets'][target]=_fit_mlp(X,y,target,max_epochs=mlp_max_epochs,
+                patience=mlp_patience,seed=mlp_seed)
+            baseline_values[target]=float(np.mean(y['train']))
             continue
         candidates = {}
         if regressor in {"auto", "linear"}:
@@ -610,14 +707,20 @@ def train(feature_dir, output, alphas=(0.01, 0.1, 1.0, 10.0, 100.0), *, plots=Tr
               "training_class_priors": class_priors}
     if task == "regression":
         bundle["regressor_family"] = regressor
+    else:
+        bundle['classifier_family']=classifier
     output = Path(output); output.mkdir(parents=True, exist_ok=True)
     with (output / "model_bundle.pkl").open("wb") as stream: pickle.dump(bundle, stream)
     (output / "metrics.json").write_text(json.dumps(report, indent=2) + "\n")
     split_definition = {name: sorted({row["segment_id"] for row in part}) for name, part in splits.items()}
     (output / "splits.json").write_text(json.dumps(split_definition, indent=2) + "\n")
     if plots:
-        from .ml_plotting import plot_training_loss
-        plot_training_loss(report,output/'training_loss')
+        from .ml_plotting import plot_training_loss,plot_mlp_training_loss
+        if any('epoch_histories' in value for value in report['targets'].values()):
+            plot_training_loss(report,output/'candidate_comparison')
+            plot_mlp_training_loss(report,output/'training_loss')
+        else:
+            plot_training_loss(report,output/'training_loss')
     return report
 
 

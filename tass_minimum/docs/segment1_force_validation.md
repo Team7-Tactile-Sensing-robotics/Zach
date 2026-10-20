@@ -1,5 +1,9 @@
 # Segment-1 force and location validation
 
+For the same-feature classifier and MLP experiment, see the
+[model comparison](ml_model_comparison.md). The existing Ridge pair remains the
+baseline and its artifacts are preserved.
+
 The recommended trained pair is
 `outputs/ml_segment1_compliant/robust/model/model_bundle.pkl`.
 Use the [robust recipe and blind results](#robust-recipe-band-peaks-and-broader-development-training)

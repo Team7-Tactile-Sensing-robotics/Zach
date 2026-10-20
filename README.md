@@ -25,6 +25,13 @@ All commands below start in `Zach/` with that environment activated.
 
 ## Contact force/location ML baseline
 
+The [Ridge/classifier/MLP comparison](tass_minimum/docs/ml_model_comparison.md)
+uses the same 27 features and trial splits for separate force/location models.
+On the shared 80-trial simulation benchmark, the MLP regressor reaches 0.356-N
+force RMSE and 1.481-mm location RMSE; all four model pairs select the allowed
+force/location labels correctly in 80/80 trials. The guide includes training,
+epoch-loss plots and inference commands.
+
 The optional [force-dependent segment-1 experiment](tass_minimum/docs/segment1_force_validation.md)
 adds configurable compliant contact to the existing TASS generator and validates
 two independent Ridge regressors on fresh and noisier simulation collections.

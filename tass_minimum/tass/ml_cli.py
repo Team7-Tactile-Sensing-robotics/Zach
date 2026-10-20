@@ -58,8 +58,13 @@ def main():
     training.add_argument("--output", type=Path, required=True)
     training.add_argument("--task", choices=["regression", "classification"], default="regression",
                           help="Classification treats each configured target's exact values as discrete classes")
-    training.add_argument("--regressor", choices=["auto", "linear", "ridge"], default="auto",
+    training.add_argument("--regressor", choices=["auto", "linear", "ridge", "mlp"], default="auto",
                           help="Regression family for each independent target model; auto compares Linear and Ridge")
+    training.add_argument('--classifier',choices=['auto','mlp'],default='auto',
+                          help='auto compares logistic/random forest; mlp uses dense networks on the same features')
+    training.add_argument('--mlp-max-epochs',type=int,default=600)
+    training.add_argument('--mlp-patience',type=int,default=60)
+    training.add_argument('--mlp-seed',type=int,default=42)
     evaluation = sub.add_parser("evaluate")
     evaluation.add_argument("--model", type=Path, required=True)
     evaluation.add_argument("--input", type=Path, required=True)
@@ -101,7 +106,9 @@ def main():
         write_feature_set(rows, names, provenance, config, args.output)
         result = {"windows": len(rows), "features": len(names), "output": str(args.output)}
     elif args.command == "train":
-        result = train(args.features, args.output, task=args.task, regressor=args.regressor)
+        result = train(args.features,args.output,task=args.task,regressor=args.regressor,
+            classifier=args.classifier,mlp_max_epochs=args.mlp_max_epochs,
+            mlp_patience=args.mlp_patience,mlp_seed=args.mlp_seed)
     elif args.command == "evaluate":
         result = evaluate(args.model, args.input, args.output,**_calibration(args,parser))
     else:

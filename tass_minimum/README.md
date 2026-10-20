@@ -14,6 +14,12 @@ not a trained contact-location or contact-force estimator.
 
 ## Simulation-to-real regression baseline
 
+For a matched comparison with independent classifiers and feature-vector MLPs,
+see the [Ridge/classifier/MLP guide](docs/ml_model_comparison.md).
+`tass.ml_cli train --regressor mlp` trains separate MLP regressors; combine
+`--task classification --classifier mlp` for separate MLP classifiers. They reuse
+the common voltage preprocessing and saved inference bundles.
+
 The first ML baseline predicts the continuous targets `contact_force_N` and
 `contact_location_m`. Real location labels must use the simulation protocol's
 recorded coordinate convention. The static generator does **not** simulate a
