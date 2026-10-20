@@ -1,5 +1,13 @@
 # ESP32 ADC observation and calibration
 
+For the user's nominal `count * 3.3 / 4095` conversion with the existing TASS
+simulator, see the [segment-1 ML guide](segment1_ml.md). The default `voltage`
+ML mode reads simulated sensor voltage directly. For real recordings it derives
+voltage from raw ADC using configurable calibration, before shared DC removal
+and feature extraction. Original captures are preserved. Calibration can be saved
+at extraction or supplied to `predict`/`evaluate`; simulation bypasses this mapping.
+Raw-count and simulated-ADC extraction remain available as explicit legacy modes.
+
 ## What is known from this repository
 
 No Arduino/ESP32 sketch or real raw-ADC capture was present when this path was

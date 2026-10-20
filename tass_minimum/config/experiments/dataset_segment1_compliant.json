@@ -1,0 +1,59 @@
+{
+  "location_fractions": [
+    0.3,
+    0.7
+  ],
+  "force_levels_N": [
+    1.0,
+    5.0
+  ],
+  "trials_per_condition": 40,
+  "location_reference": "segment1_from_base",
+  "window_s": 5.0,
+  "sample_rate_Hz": 75000,
+  "held_joint_angle_rad": 0.0,
+  "fixed_force_lever_arm_m": 0.04,
+  "pulse_amplitude_N": 0.002,
+  "pulse_width_s": 0.001,
+  "pulse_delay_in_slot_s": 0.01,
+  "force_jitter_fraction": 0.0,
+  "position_jitter_m": 0.0,
+  "gain_jitter_fraction": 0.03,
+  "excitation_jitter_fraction": 0.03,
+  "noise_std_V": 1e-05,
+  "seed": 20260929,
+  "actuator_force_per_volt_N_V": [
+    0.001,
+    0.001,
+    0.001,
+    0.001
+  ],
+  "excitation_type": "chirp",
+  "chirp_schedule": "simultaneous",
+  "chirp_duration_s": 0.3,
+  "chirp_start_Hz": 20.0,
+  "chirp_end_Hz": 2000.0,
+  "chirp_amplitude_V": 3.3,
+  "chirp_ramp_s": 0.005,
+  "active_actuator_ids": [
+    1,
+    2
+  ],
+  "recorded_pair_ids": [
+    1,
+    2
+  ],
+  "adc": {
+    "enabled": false
+  },
+  "contact_response": {
+    "mode": "compliant",
+    "reference_force_N": 1.0,
+    "stiffness_at_reference_N_m": 200.0,
+    "damping_at_reference_Ns_m": 0.004,
+    "stiffness_force_exponent": 0.3333333333333333,
+    "damping_force_exponent": 0.3333333333333333,
+    "coefficient_jitter_fraction": 0.1,
+    "parameter_source": "assumed"
+  }
+}

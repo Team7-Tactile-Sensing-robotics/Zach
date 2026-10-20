@@ -45,6 +45,24 @@ sensor 1 only. Use `--window-s`/`--stride-s` for other windows and repeated
 RMSE. The test report includes MAE, RMSE, and R² for the selected model and a
 training-mean baseline; it also records all Linear/Ridge validation results.
 
+For discrete target labels, `train --task classification` compares logistic
+regression and random forests, selecting by validation log loss and reporting
+accuracy, balanced accuracy, macro F1, log loss and confusion matrices against
+a training-prior baseline. `predict`/`evaluate` automatically use the saved task,
+class mapping and preprocessing; predictions include class probabilities.
+See the [segment-1 classifier experiment](docs/segment1_ml.md#try-discrete-classification-before-changing-contact-mechanics)
+for commands and its matched comparison with regression. Continuous labels
+remain a regression task; classification does not add force information to
+the current force-invariant segment-1 simulation.
+
+For the optional compliant-contact experiment, the
+[force/location validation guide](docs/segment1_force_validation.md#robust-recipe-band-peaks-and-broader-development-training)
+trains two independent Ridge regressors with `--spectral-mode band_peaks`.
+This mode uses band-limited peaks and normalized band powers instead of global
+peak features, and broader development variation addresses mode-switch failures.
+A new blind collection is reserved after recipe selection. Force-dependent
+contact coefficients remain uncalibrated assumptions, not a hardware validation.
+
 For the current two-pair hardware, use the common subset of simulated channels:
 
 ```bash
@@ -84,8 +102,14 @@ should come from a matched pre-contact/reference acquisition using the same
 excitation and acquisition settings.
 
 Default predictors are sensor mean, standard deviation, RMS, peak-to-peak,
-dominant frequency, three band powers, and sample rate. Raw ADC is preferred
-when both counts and diagnostic voltage are present. `feature_provenance.json` identifies simulated voltage,
+dominant frequency, three band powers, and sample rate. The default `voltage`
+representation reads simulation voltage directly and converts real raw ADC with
+an explicit affine calibration before the same preprocessing. With real counts
+present, diagnostic voltage is ignored. Supply `--adc-volts-per-count` and
+`--adc-voltage-offset-v` (or a nominal `--adc-full-scale-v` mapping) during
+extraction or real prediction/evaluation. `--remove-sensor-mean` removes DC bias
+on either path. See the [segment-1 guide](docs/segment1_ml.md) for complete commands.
+`feature_provenance.json` identifies simulated voltage,
 calibrated real voltage, raw measured ADC, and derived features. A differential
 DAC voltage is marked derived, never direct-measured. A shared inference-time
 constant such as transmitter frequency can be added with
@@ -107,6 +131,10 @@ Extraction writes `features.csv`, `feature_config.json`, `feature_order.json`,
 and `feature_provenance.json`. Training writes `model_bundle.pkl` (fitted
 scalers/models, feature order, targets, and configuration), `metrics.json`, and
 `splits.json`. Prediction writes identifiers, window times, and target estimates.
+Training also saves training/validation MSE plots across model candidates;
+prediction/evaluation saves per-window inference graphs as PNG and SVG. These
+Linear/Ridge solvers do not have epochs. Prediction's `*.preprocessing.json`
+records effective calibration, and original capture CSVs are preserved.
 
 Known limitations: the hard-clamp simulator has no load-cell electronics,
 contact compliance, calibrated ADC transfer parameters/domain randomization, or

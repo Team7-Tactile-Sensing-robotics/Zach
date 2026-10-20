@@ -25,6 +25,27 @@ All commands below start in `Zach/` with that environment activated.
 
 ## Contact force/location ML baseline
 
+The optional [force-dependent segment-1 experiment](tass_minimum/docs/segment1_force_validation.md)
+adds configurable compliant contact to the existing TASS generator and validates
+two independent Ridge regressors on fresh and noisier simulation collections.
+Its preload-dependent stiffness/damping are explicit, uncalibrated assumptions;
+hardware force accuracy requires measured contact-response calibration.
+
+For the current **TASS segment-1 experiment**, use the
+[segment-1 training guide](tass_minimum/docs/segment1_ml.md). It uses the existing
+TASS simulator with actuators/sensors 1 and 2, contacts at 30% and 70% of
+segment 1, and force labels 1 N and 5 N. Simulation ML uses the saved sensor
+voltage directly. Real raw ADC captures are calibrated to voltage before the
+same DC removal and feature extraction; original recordings are preserved.
+The existing hard-clamp model does not encode
+proximal contact-force magnitude in the sensor response; evaluate force against
+the mean baseline rather than interpreting it as a validated force estimator.
+For discrete 1/5-N and 45/105-mm labels, `tass.ml_cli train --task classification`
+also fits logistic/random-forest candidates. The [classification comparison](tass_minimum/docs/segment1_ml.md#try-discrete-classification-before-changing-contact-mechanics)
+uses the same held-out trials: force accuracy is 8/12, equal to rounding the
+regressor to the two force classes; classification does not resolve the missing
+force dependence.
+
 The shared simulation/real-capture feature pipeline and Linear/Ridge regression
 baseline are documented in the [simulation-to-real guide](tass_minimum/README.md#simulation-to-real-regression-baseline).
 From this repository root, the core commands are:
@@ -44,6 +65,52 @@ python -m tass.ml_cli predict --model outputs/ml_model/model_bundle.pkl \
 Simulation test metrics and held-out labeled real-capture metrics are reported
 separately. The model is not a demonstrated sim-to-real estimator until the
 latter evaluation exists.
+
+For the focused segment-1 experiment, generate and train with:
+
+```bash
+python -m tass.dataset --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_segment1_30_70.json \
+  --output outputs/dataset_segment1_30_70_1_5
+python -m tass.ml_cli extract --input outputs/dataset_segment1_30_70_1_5 \
+  --output outputs/ml_segment1_voltage/features --sensor-representation voltage \
+  --remove-sensor-mean \
+  --sensor-id 1 --sensor-id 2 --window-s 5 --stride-s 5 \
+  --target contact_location_m --target contact_force_N
+python -m tass.ml_cli train --features outputs/ml_segment1_voltage/features \
+  --output outputs/ml_segment1_voltage/model
+python -m tass.ml_cli evaluate --model outputs/ml_segment1_voltage/model/model_bundle.pkl \
+  --input outputs/dataset_segment1_30_70_1_5 \
+  --output outputs/ml_segment1_voltage/model/simulation_evaluation.json
+```
+
+Training saves `training_loss.png`/`.svg` with training and validation MSE for
+each Linear/Ridge candidate (these direct solvers have no epochs). Evaluation
+saves `simulation_evaluation.predictions.png`/`.svg`, comparing actual labels
+with held-out predictions. Existing simulation datasets can be reused: their
+voltage channels are read directly and optional simulated ADC is ignored.
+
+To train with analytical position/tension features, see
+[the physics-feature commands and assumption audit](tass_minimum/docs/segment1_ml.md#enable-analytical-features-in-training-and-inference).
+Use `--reference-features --physics-features` at extraction; the trained bundle
+automatically recomputes those features at prediction. A matched reference
+waveform is required for each sensor. Compare against the same sensor-only
+trial splits; proximal-force identifiability and two-span geometry limits remain.
+
+`--sensor-id` selects ML inputs and does not change excitation in saved data.
+`--actuator-id` makes other actuator drives exactly zero; regenerate when
+changing this selection. Full-finger mechanics are retained. The focused protocol
+sets `recorded_pair_ids: [1, 2]` so saved piezo arrays and columns contain only
+pairs 1/2; other protocols retain four-channel exports by default. Actuator selection can also be saved as
+`"active_actuator_ids": [1, 2]` in the protocol JSON; CLI values override it.
+The focused simultaneous protocol drives both selected actuators for 0.3 seconds
+and records for 5 seconds at the requested 75 kHz. Sequential/pulse protocols retain their original
+quarter-window channel slots, including silent slots for disabled actuators.
+`location_reference: segment1_from_base` interprets fractions relative to the
+150-mm first segment (45/105 mm), rather than the entire finger or tendon.
+For the optional
+two-span physics features, P1/P2 must actually lie on opposite sides of contact;
+they do not bracket contacts farther along the finger.
 
 ## Spring–tendon actuation
 

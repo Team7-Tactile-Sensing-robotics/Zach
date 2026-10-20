@@ -173,11 +173,14 @@ def export_trial(trial_number, dataset=DEFAULT_DATASET, output=None, *, start_s=
     source = dataset / "trials" / f"{trial_id}.npz"
     if not source.is_file():
         raise FileNotFoundError(f"Trial file not found: {source}")
-    names = (["time_s"]
-             + [f"piezo_sensor_{i}_V" for i in range(1, 5)]
-             + [f"piezo_actuator_{i}_V" for i in range(1, 5)]
-             + ["contact_force_N", "contact_location_m", "servo_angle_rad", "servo_torque_Nm"])
     with np.load(source, allow_pickle=False) as trial:
+        pair_ids = [i for i in range(1, 5) if f"piezo_sensor_{i}_V" in trial.files]
+        if not pair_ids:
+            raise ValueError("Trial contains no saved piezo sensor voltage channels")
+        names = (["time_s"]
+                 + [f"piezo_sensor_{i}_V" for i in pair_ids]
+                 + [f"piezo_actuator_{i}_V" for i in pair_ids]
+                 + ["contact_force_N", "contact_location_m", "servo_angle_rad", "servo_torque_Nm"])
         missing = set(names) - set(trial.files)
         if missing:
             raise ValueError(f"Trial lacks required channels: {', '.join(sorted(missing))}. "
@@ -212,13 +215,14 @@ def export_trial(trial_number, dataset=DEFAULT_DATASET, output=None, *, start_s=
         writer.writerow(channels)
         writer.writerows(zip(*channels.values()))
 
-    fig, axes = plt.subplots(4, 2, figsize=(14, 11), sharex=True, constrained_layout=True)
-    for i in range(4):
+    fig, axes = plt.subplots(len(pair_ids), 2, figsize=(14, max(5, 2.75*len(pair_ids))),
+                             sharex=True, squeeze=False, constrained_layout=True)
+    for row, number in enumerate(pair_ids):
         for col, kind, label in ((0, "actuator", "Actuator drive"), (1, "sensor", "Sensor")):
-            ax = axes[i, col]
-            ax.plot(plot_time, channels[f"piezo_{kind}_{i+1}_V"][visible], lw=.6,
+            ax = axes[row, col]
+            ax.plot(plot_time, channels[f"piezo_{kind}_{number}_V"][visible], lw=.6,
                     color="royalblue" if col == 0 else "seagreen")
-            ax.set(title=f"{label} {i+1}", ylabel="Voltage [V]")
+            ax.set(title=f"{label} {number}", ylabel="Voltage [V]")
             ax.set_xlim(start, end)
             # Set X-axis interval to 0.1 seconds
             ax.set_xticks(np.arange(start, end + 0.001, 0.1))

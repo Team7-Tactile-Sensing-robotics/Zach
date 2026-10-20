@@ -54,3 +54,23 @@ class ChirpProtocolTests(unittest.TestCase):
                        {'chirp_duration_s':.005,'chirp_ramp_s':.005}):
             with self.assertRaises(ValueError):
                 replace(Protocol(),excitation_type='chirp',**kwargs).validate()
+
+    def test_selected_actuators_are_only_excitation_sources(self):
+        t=np.arange(48000)/48000
+        for kwargs in ({'excitation_type':'pulse'},
+                       {'excitation_type':'chirp'},
+                       {'excitation_type':'chirp','chirp_schedule':'sequential'}):
+            with self.subTest(**kwargs):
+                protocol=replace(Protocol(),**kwargs)
+                full=actuator_drives(t,protocol.validate(),np.random.default_rng(42))
+                selected=replace(protocol,active_actuator_ids=(1,2)).validate()
+                drives=actuator_drives(t,selected,np.random.default_rng(42))
+                np.testing.assert_array_equal(drives[:,:2],full[:,:2])
+                np.testing.assert_array_equal(drives[:,2:],0)
+                self.assertTrue(np.all(np.any(drives[:,:2] != 0,axis=0)))
+
+    def test_actuator_selection_validation(self):
+        for ids in ((),(0,),(5,),(1,1),(1.0,2),(True,2)):
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                replace(Protocol(),active_actuator_ids=ids).validate()
+        replace(Protocol(),active_actuator_ids=[1,2]).validate()

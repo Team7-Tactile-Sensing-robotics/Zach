@@ -1,5 +1,10 @@
 # Synchronized simulation data
 
+For the focused TASS experiment with only pairs 1/2, contacts at 30%/70% of
+segment 1, and forces 1/5 N, see the [segment-1 training guide](segment1_ml.md).
+It uses this same generator with `location_reference: segment1_from_base` and
+`recorded_pair_ids: [1, 2]`; it does not replace the TASS forward model.
+
 From `Zach`, run:
 
 ```bash
@@ -176,6 +181,26 @@ present, and the time needed to decay depends on model damping. Amplitude is pea
 bipolar voltage (nominal ±2 V), subject to the configured trial jitter.
 Force = voltage × actuator_force_per_volt_N_V. The saved drive voltage traces
 therefore describe the actual excitation supplied to the model.
+
+To drive only segment-1 actuators P1/P2, add `--actuator-id 1 --actuator-id 2`
+to the dataset-generation command, or set `"active_actuator_ids": [1, 2]` in
+the protocol JSON. The default remains all four. Disabled actuator voltage/force
+channels are zero in both contacted and reference simulations. By default all
+four pairs are saved. Set `recorded_pair_ids: [1, 2]` to export only those pairs
+and two-column compact matrices; full-finger mechanics remain intact. The IDs
+and column order are saved in trial metadata and the dataset summary.
+
+Schema 2.4 also records configurable `contact_response`: legacy `hard_clamp`
+or a preload-dependent point spring/damper (`compliant`). The latter is an
+incremental vibration model around preload, with editable coefficient laws and
+explicit assumed/measured provenance; it does not simulate indentation geometry.
+`contact_response_force_dependent` reports structural dependence, while
+`contact_force_identifiable` is null for compliant contact pending validation.
+`tass.dataset --split test` can assign a separate fresh collection entirely to
+evaluation. See the [force/location validation guide](segment1_force_validation.md).
+Select only `--sensor-id 1 --sensor-id 2` at ML feature extraction to
+exclude those receivers. Filtering sensors from an old dataset does not undo
+actuator 3/4 excitation; regenerate into a new directory for this setup.
 
 Edit `chirp_duration_s` to change actuation duration and `window_s` to change
 the total sensing duration in `config/experiments/dataset_straight_segments.json`.
