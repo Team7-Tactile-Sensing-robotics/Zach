@@ -1,4 +1,4 @@
-"""Interactive, single-input finger mechanics. No acoustic simulation.
+"""Interactive finger mechanics with a separate four-pair acoustic preview.
 
 Run from the repository root:
     streamlit run finger_physical_app.py
@@ -17,6 +17,7 @@ import time
 import numpy as np
 
 from finger_parameters import FingerParameters
+from finger_acoustics import render_acoustics_panel
 from tass_minimum.tass.config import ModelConfig, Joint, Spring
 from tass_minimum.tass.models.tendon import Tendon
 from tass_minimum.tass.models.spring import ReturnSpring
@@ -50,7 +51,7 @@ class FingerModel:
             rest_length=p.tendon_rest_length_m,
             k=p.tendon_stiffness_N_m, c=p.tendon_damping_Ns_m,
             slack=p.tendon_slack_m,
-            joint_position=joint, spool_position=p.spool_position_m,
+            joint_position=joint, spool_position=p.spool_feed_position_m,
             p1=p.tendon_p1_m, p2=p.tendon_p2_m,
             p3=joint+p.tendon_p3_offset_m, p4=joint+p.tendon_p4_offset_m,
             load_cell=joint+p.load_cell_offset_m,
@@ -179,8 +180,8 @@ def finger_svg(model):
     joint = tendon.joint_position
     envelope = np.vstack((
         (0.0, 0.0), joint, tendon.p1, tendon.p2,
-        tendon.spool_position + (-p.spool_radius_m, -p.spool_radius_m),
-        tendon.spool_position + (p.spool_radius_m, p.spool_radius_m),
+        np.array(p.spool_position_m) - p.spool_radius_m,
+        np.array(p.spool_position_m) + p.spool_radius_m,
         tendon.rotate_about_joint(joint + (p.distal_length_m, 0.0), angles),
         tendon.rotate_about_joint(tendon.p3_reference, angles),
         tendon.rotate_about_joint(tendon.p4_reference, angles),
@@ -253,8 +254,8 @@ def finger_svg(model):
     lc_x, lc_y = screen(load_cell)
     parts.append(f'<rect x="{lc_x-14:.2f}" y="{lc_y-6:.2f}" width="28" height="12" rx="2" fill="#65baff" stroke="#eff5ff" transform="rotate({r["joint_angle_deg"]:.2f} {lc_x:.2f} {lc_y:.2f})"/>')
     parts.append(text(lc_x+20, lc_y-12, 'Load cell · anchor', '#65baff', 11))
-    # Spool at its actual fixed feed point; the spoke rotates with actual phi.
-    sx, sy = screen(tendon.spool_position)
+    # Draw the drum at its centre; the tendon starts at its tangent exit.
+    sx, sy = screen(p.spool_position_m)
     radius = scale*p.spool_radius_m
     parts.append(f'<rect x="{sx-31}" y="{sy-23}" width="62" height="46" rx="10" fill="#25354e" stroke="#60728c"/>')
     parts.append(f'<circle cx="{sx}" cy="{sy}" r="{radius}" fill="#15243a" stroke="#4cd5ca" stroke-width="2"/>')
@@ -296,9 +297,9 @@ def finger_svg(model):
 def run_app():
     import streamlit as st
 
-    st.set_page_config(page_title="TASS · Finger mechanics", page_icon="🦾", layout="wide")
-    st.title("Finger mechanics")
-    st.caption("One motor input · load-cell tendon anchor · linear return spring")
+    st.set_page_config(page_title="TASS · Finger dynamics", page_icon="🦾", layout="wide")
+    st.title("Finger mechanics & acoustics")
+    st.caption("Motor-driven finger · linear return spring · four excitation/receiver pairs")
     try:
         parameters = FingerParameters()
     except (ValueError, TypeError) as exc:
@@ -311,10 +312,14 @@ def run_app():
         st.session_state.finger_paused = False
         st.session_state.finger_last_tick = time.monotonic()
         st.session_state.finger_history = deque(maxlen=parameters.history_samples)
-        st.session_state.finger_model_version = 3
+        st.session_state.finger_model_version = 5
         st.session_state.finger_parameter_snapshot = asdict(parameters)
+        st.session_state.pop('finger_acoustics', None)
+        for key in list(st.session_state):
+            if key.startswith('acoustic_'):
+                del st.session_state[key]
 
-    if ("finger_model" not in st.session_state or st.session_state.get('finger_model_version') != 3
+    if ("finger_model" not in st.session_state or st.session_state.get('finger_model_version') != 5
             or st.session_state.get('finger_parameter_snapshot') != asdict(parameters)):
         reset_model()
 
@@ -334,6 +339,33 @@ def run_app():
         st.session_state.finger_paused = not st.session_state.finger_paused
         st.session_state.finger_last_tick = time.monotonic()
 
+    model = st.session_state.finger_model
+    controls, live_display = st.columns([1.05, 3.15], gap="large")
+    with controls:
+        st.subheader("Motor control")
+        slider_slot = st.empty()
+        a, b = st.columns(2)
+        button_step = model.parameters.motor_button_step_deg
+        # Controls stay outside the timed displays. Apply button changes before
+        # creating the slider so both command inputs share the updated value.
+        if a.button(f"−{button_step:g}° Unwind", key="unwind", use_container_width=True):
+            change_target(delta=-button_step)
+        if b.button(f"+{button_step:g}° Wind", key="wind", type="primary", use_container_width=True):
+            change_target(delta=button_step)
+        if st.button("Release to 0°", key="release", use_container_width=True):
+            change_target(target=0.0)
+        if st.button("Hold motor here", key="hold", use_container_width=True):
+            change_target(hold=True)
+        slider_slot.slider("Commanded motor angle (°)", 0.0, float(model.parameters.motor_limit_deg),
+                           step=float(model.parameters.motor_slider_step_deg),
+                           key="motor_target_deg", on_change=apply_target)
+        st.caption("The slider and buttons set the same input: motor position. The finger angle follows from tendon and spring forces.")
+        st.divider()
+        st.button("Resume simulation" if st.session_state.finger_paused else "Pause simulation",
+                  key="pause", on_click=toggle_pause, use_container_width=True)
+        st.button("Reset model", key="reset", on_click=reset_model, use_container_width=True)
+        st.caption("Pause freezes simulation time. Hold keeps the current motor position while the finger settles.")
+
     @st.fragment(run_every=parameters.display_interval_s)
     def live_panel():
         model = st.session_state.finger_model
@@ -346,28 +378,7 @@ def run_app():
             model.advance(min(model.parameters.max_frame_simulation_s, max(0.0, elapsed)))
         r = model.readouts()
 
-        controls, diagram, states = st.columns([1.05, 2.15, 1.0], gap="large")
-        with controls:
-            st.subheader("Motor control")
-            st.slider("Commanded motor angle (°)", 0.0, float(model.parameters.motor_limit_deg),
-                      step=float(model.parameters.motor_slider_step_deg),
-                      key="motor_target_deg", on_change=apply_target)
-            a, b = st.columns(2)
-            button_step = model.parameters.motor_button_step_deg
-            a.button(f"−{button_step:g}° Unwind", key="unwind", on_click=change_target,
-                     kwargs={"delta": -button_step}, use_container_width=True)
-            b.button(f"+{button_step:g}° Wind", key="wind", type="primary", on_click=change_target,
-                     kwargs={"delta": button_step}, use_container_width=True)
-            st.button("Release to 0°", key="release", on_click=change_target,
-                      kwargs={"target": 0.0}, use_container_width=True)
-            st.button("Hold motor here", key="hold", on_click=change_target,
-                      kwargs={"hold": True}, use_container_width=True)
-            st.caption("The slider and buttons set the same input: motor position. The finger angle follows from tendon and spring forces.")
-            st.divider()
-            st.button("Resume simulation" if st.session_state.finger_paused else "Pause simulation",
-                      key="pause", on_click=toggle_pause, use_container_width=True)
-            st.button("Reset model", key="reset", on_click=reset_model, use_container_width=True)
-            st.caption("Pause freezes simulation time. Hold keeps the current motor position while the finger settles.")
+        diagram, states = st.columns([2.15, 1.0], gap="large")
 
         with diagram:
             st.markdown(finger_svg(model), unsafe_allow_html=True)
@@ -432,18 +443,21 @@ def run_app():
                 ]
             ])
 
-    live_panel()
+    with live_display:
+        live_panel()
     with st.expander("Model parameters and equations"):
         st.write("P1–P4 are sliding guides. The tendon continues past P4 to the load cell on segment 2. A linear extension spring connects brackets on the opposite side of the joint. Its length and moment arm change with finger angle. The load-cell reading equals tendon tension for the ideal frictionless, rigid-attachment model.")
         st.latex(r"\delta = r_s\phi + L(\theta)-L(0)-\delta_{\mathrm{slack}}+T_0/k_t,\quad \tau_t=-T\,L'(\theta)")
         st.latex(r"F_s=k_s\max(0,\ell_s(\theta)-\ell_{s0}),\quad \tau_s=-F_s\ell_s'(\theta)")
         st.latex(r"J\ddot\theta=\tau_t+\tau_s-b\dot\theta,\qquad u(t)=\phi_{\mathrm{command}}(t)")
-        st.caption("Edit finger_parameters.py to change all model settings: segment lengths, piezo/idler-guide positions, load cell, spring, tendon material, inertia, damping and motor limits. Save and rerun/refresh the app; changed settings reset the simulation. Values are placeholders until measured on your prototype.")
+        st.caption("Edit finger_parameters.py to change all model settings. Save and rerun/refresh to reset the simulation. Geometry uses TASS_assy_1.STEP; distal stations are inferred from mounting holes. Material constants, spring free length/stiffness and dynamic properties still require measurement. See tass_minimum/docs/cad_measurements.md for assumptions.")
         material_mode = "measured override" if parameters.tendon_stiffness_override_N_m is not None else "E × A / L₀"
         st.write(f"Effective tendon stiffness: **{parameters.tendon_stiffness_N_m:g} N/m** ({material_mode}).")
-        st.caption("Spring preload comes from choosing a free length shorter than the initial bracket separation. Piezo positions specify the mechanical guide locations; no acoustic model is included.")
+        st.caption("Spring preload comes from choosing a free length shorter than the initial bracket separation. The acoustic panel uses these same guide locations for its four excitation/receiver pairs.")
         st.json(asdict(st.session_state.finger_model.parameters), expanded=False)
-        st.caption("Frictionless guides and a straight, unobstructed joint span are assumed. No external load or gravity is applied. Tendon tension cannot be negative. No acoustic model runs in this app.")
+        st.caption("Frictionless guides and a straight, unobstructed joint span are assumed. No external load or gravity is applied. Tendon tension cannot be negative.")
+
+    render_acoustics_panel(parameters)
 
 
 if __name__ == "__main__":

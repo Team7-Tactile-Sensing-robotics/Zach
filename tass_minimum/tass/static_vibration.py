@@ -9,6 +9,26 @@ from scipy.linalg import eigh, expm
 from scipy.signal import lfilter
 
 
+def oscillator_response(omega_squared, decay_rate, forcing, sample_rate, initial_state=(0., 0.)):
+    """Exact held-input integration of q'' + decay*q' + omega²*q = u.
+
+    Return q and qdot at each interval's start, plus final (q, qdot) for the next
+    block. Extends the matrix-exponential method below to nonzero initial state.
+    """
+    augmented = np.array([[0., 1., 0.], [-omega_squared, -decay_rate, 1.], [0., 0., 0.]])
+    transition = expm(augmented/sample_rate)
+    A, B = transition[:2, :2], transition[:2, 2]
+    denominator = [1., -np.trace(A), np.linalg.det(A)]
+    q0, v0 = initial_state
+    # Extra unused input exposes the state after the final real forcing interval.
+    drive = np.append(forcing, 0.)
+    q, _ = lfilter([0., B[0], A[0, 1]*B[1]-A[1, 1]*B[0]], denominator,
+                   drive, zi=[q0, A[0, 1]*v0-A[1, 1]*q0])
+    v, _ = lfilter([0., B[1], A[1, 0]*B[0]-A[0, 0]*B[1]], denominator,
+                   drive, zi=[v0, A[1, 0]*q0-A[0, 0]*v0])
+    return q[:-1], v[:-1], np.array([q[-1], v[-1]])
+
+
 def static_response(grid, tension, mu, damping, contact_node, actuator_positions,
                     sensor_positions, forces, sample_rate):
     n = len(grid)

@@ -1,0 +1,1 @@
+session_id,trial_id,data_source,time_s,contact_force_N,contact_location_m,piezo_sensor_1_V,piezo_sensor_2_V,piezo_sensor_3_V,piezo_sensor_4_V,piezo_actuator_1_V,piezo_actuator_2_V,piezo_actuator_3_V,piezo_actuator_4_V,servo_angle_rad,servo_torque_Nm,load_cell_N,excitation_frequency_Hz,quality_flag

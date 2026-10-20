@@ -6,4 +6,4 @@ PyYAML>=6.0
 
 # Interactive Streamlit app
 pandas>=2.0
-streamlit>=1.30
+streamlit>=1.37

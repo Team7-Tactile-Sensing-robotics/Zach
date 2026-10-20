@@ -8,8 +8,9 @@ A runnable Python model of the V1 single-joint finger, based on the supplied
 Motor angle → tendon winding → joint motion and tension → string vibration →
 synthetic piezo voltage → frequency features.
 
-**All dimensions and material properties are editable demonstration values.**
-They have not been calibrated against your prototype. This is a forward simulator,
+**This package's CLI presets retain editable demonstration dimensions and material properties.**
+The separate root finger app now uses [STEP-derived geometry](docs/cad_measurements.md),
+with uncalibrated material/dynamic properties. This is a forward simulator,
 not a trained contact-location or contact-force estimator.
 
 ## Run it
@@ -43,12 +44,15 @@ experiments belong in a small script like `examples/custom_run.py`.
 
 ## Change the model
 
-For the separate **finger-only interactive app**, edit the repository-root
+For the separate **finger and acoustic-preview app**, edit the repository-root
 `finger_parameters.py`. That is its single configuration location for segment
 dimensions, P1–P4 piezo/idler-guide placement, the load-cell attachment, linear
-spring geometry, tendon material constants, joint mechanics and motor settings.
+spring geometry, tendon material constants, joint mechanics, motor settings,
+and acoustic density, damping, receiver gains and excitation defaults.
 Tendon stiffness follows `E*A/L0` unless a measured stiffness override is set.
 Save and rerun/refresh the app to apply all changes together.
+Its [acoustic panel](docs/finger_acoustics.md) supports four independent exciters,
+receiver waveforms/spectra, and persistent vibration with free ringdown.
 
 Start with `config/default.json`. Field names include units. Run your version with:
 
