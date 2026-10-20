@@ -46,3 +46,16 @@ class DatasetTests(unittest.TestCase):
         self.assertAlmostEqual(trial[3]['force_lever_arm_m'],0.06)
         with self.assertRaises(ValueError):
             replace(p,location_reference='unknown').validate()
+
+    def test_sensor_ringdown_continues_after_actuators_stop(self):
+        c=ModelConfig();c=replace(c,string=replace(c.string,nodes=21))
+        p=replace(Protocol(),excitation_type='chirp',window_s=1.5,
+                  chirp_duration_s=.3,noise_std_V=0)
+        time,volts,drives,metadata=make_trial(c,p,.4,2,42)
+        self.assertEqual(len(time),72000)
+        self.assertEqual(metadata['chirp_duration_s'],.3)
+        np.testing.assert_array_equal(drives[time>=.3],0)
+        early=np.sqrt(np.mean(volts[(time>=.35)&(time<.45)]**2))
+        late=np.sqrt(np.mean(volts[time>=1.4]**2))
+        self.assertGreater(early,1e-8)
+        self.assertLess(late,early*.5)

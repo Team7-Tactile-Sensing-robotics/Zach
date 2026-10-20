@@ -1,0 +1,35 @@
+{
+  "location_fractions": [
+    0.2,
+    0.4,
+    0.6,
+    0.8
+  ],
+  "force_levels_N": [
+    1.0,
+    2.0,
+    5.0,
+    10.0
+  ],
+  "trials_per_condition": 20,
+  "location_reference": "total_tendon",
+  "window_s": 1.0,
+  "sample_rate_Hz": 48000,
+  "held_joint_angle_rad": 0.5,
+  "fixed_force_lever_arm_m": 0.04,
+  "pulse_amplitude_N": 0.002,
+  "pulse_width_s": 0.001,
+  "pulse_delay_in_slot_s": 0.01,
+  "force_jitter_fraction": 0.02,
+  "position_jitter_m": 0.0005,
+  "gain_jitter_fraction": 0.03,
+  "excitation_jitter_fraction": 0.03,
+  "noise_std_V": 1e-05,
+  "seed": 20260929,
+  "actuator_force_per_volt_N_V": [
+    0.001,
+    0.001,
+    0.001,
+    0.001
+  ]
+}

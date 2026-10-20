@@ -3,7 +3,13 @@
 Zach includes an interactive finger-mechanics app, a time-domain reference
 simulation, and the routed modal vibration model adapted from
 `string-finger-simulator`. It runs independently; the sibling repository is
-not required. Parameters are demonstration values, not hardware calibration.
+not required. The finger app geometry uses the supplied STEP assembly;
+material and dynamic properties still require hardware calibration.
+
+For FFT feature extraction and parallel linear/logistic comparisons of contact
+force and location, see the separate [machine learning framework](machine_learning/README.md).
+It includes a recording template, standardized interaction/subset experiments,
+grouped validation, significance tables and a runnable synthetic example.
 
 ## Install
 
@@ -23,9 +29,136 @@ Alternatively, `python -m pip install -e './tass_minimum[app]'` installs both
 the package and all runtime dependencies in one command.
 All commands below start in `Zach/` with that environment activated.
 
+## Contact force/location ML baseline
+
+The [Ridge/classifier/MLP comparison](tass_minimum/docs/ml_model_comparison.md)
+uses the same 27 features and trial splits for separate force/location models.
+On the shared 80-trial simulation benchmark, the MLP regressor reaches 0.356-N
+force RMSE and 1.481-mm location RMSE; all four model pairs select the allowed
+force/location labels correctly in 80/80 trials. The guide includes training,
+epoch-loss plots and inference commands.
+
+The optional [force-dependent segment-1 experiment](tass_minimum/docs/segment1_force_validation.md)
+adds configurable compliant contact to the existing TASS generator and validates
+two independent Ridge regressors on fresh and noisier simulation collections.
+Its preload-dependent stiffness/damping are explicit, uncalibrated assumptions;
+hardware force accuracy requires measured contact-response calibration.
+
+For the current **TASS segment-1 experiment**, use the
+[segment-1 training guide](tass_minimum/docs/segment1_ml.md). It uses the existing
+TASS simulator with actuators/sensors 1 and 2, contacts at 30% and 70% of
+segment 1, and force labels 1 N and 5 N. Simulation ML uses the saved sensor
+voltage directly. Real raw ADC captures are calibrated to voltage before the
+same DC removal and feature extraction; original recordings are preserved.
+The existing hard-clamp model does not encode
+proximal contact-force magnitude in the sensor response; evaluate force against
+the mean baseline rather than interpreting it as a validated force estimator.
+For discrete 1/5-N and 45/105-mm labels, `tass.ml_cli train --task classification`
+also fits logistic/random-forest candidates. The [classification comparison](tass_minimum/docs/segment1_ml.md#try-discrete-classification-before-changing-contact-mechanics)
+uses the same held-out trials: force accuracy is 8/12, equal to rounding the
+regressor to the two force classes; classification does not resolve the missing
+force dependence.
+
+The shared simulation/real-capture feature pipeline and Linear/Ridge regression
+baseline are documented in the [simulation-to-real guide](tass_minimum/README.md#simulation-to-real-regression-baseline).
+From this repository root, the core commands are:
+
+```bash
+python -m tass.dataset --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_channels_v2.json \
+  --output outputs/dataset_channels_v2
+python -m tass.ml_cli extract --input outputs/dataset_channels_v2 \
+  --output outputs/ml_features
+python -m tass.ml_cli train --features outputs/ml_features \
+  --output outputs/ml_model
+python -m tass.ml_cli predict --model outputs/ml_model/model_bundle.pkl \
+  --input captures/new_capture.csv --output outputs/new_capture_predictions.csv
+```
+
+Simulation test metrics and held-out labeled real-capture metrics are reported
+separately. The model is not a demonstrated sim-to-real estimator until the
+latter evaluation exists.
+
+For the focused segment-1 experiment, generate and train with:
+
+```bash
+python -m tass.dataset --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_segment1_30_70.json \
+  --output outputs/dataset_segment1_30_70_1_5
+python -m tass.ml_cli extract --input outputs/dataset_segment1_30_70_1_5 \
+  --output outputs/ml_segment1_voltage/features --sensor-representation voltage \
+  --remove-sensor-mean \
+  --sensor-id 1 --sensor-id 2 --window-s 5 --stride-s 5 \
+  --target contact_location_m --target contact_force_N
+python -m tass.ml_cli train --features outputs/ml_segment1_voltage/features \
+  --output outputs/ml_segment1_voltage/model
+python -m tass.ml_cli evaluate --model outputs/ml_segment1_voltage/model/model_bundle.pkl \
+  --input outputs/dataset_segment1_30_70_1_5 \
+  --output outputs/ml_segment1_voltage/model/simulation_evaluation.json
+```
+
+Training saves `training_loss.png`/`.svg` with training and validation MSE for
+each Linear/Ridge candidate (these direct solvers have no epochs). Evaluation
+saves `simulation_evaluation.predictions.png`/`.svg`, comparing actual labels
+with held-out predictions. Existing simulation datasets can be reused: their
+voltage channels are read directly and optional simulated ADC is ignored.
+
+To train with analytical position/tension features, see
+[the physics-feature commands and assumption audit](tass_minimum/docs/segment1_ml.md#enable-analytical-features-in-training-and-inference).
+Use `--reference-features --physics-features` at extraction; the trained bundle
+automatically recomputes those features at prediction. A matched reference
+waveform is required for each sensor. Compare against the same sensor-only
+trial splits; proximal-force identifiability and two-span geometry limits remain.
+
+`--sensor-id` selects ML inputs and does not change excitation in saved data.
+`--actuator-id` makes other actuator drives exactly zero; regenerate when
+changing this selection. Full-finger mechanics are retained. The focused protocol
+sets `recorded_pair_ids: [1, 2]` so saved piezo arrays and columns contain only
+pairs 1/2; other protocols retain four-channel exports by default. Actuator selection can also be saved as
+`"active_actuator_ids": [1, 2]` in the protocol JSON; CLI values override it.
+The focused simultaneous protocol drives both selected actuators for 0.3 seconds
+and records for 5 seconds at the requested 75 kHz. Sequential/pulse protocols retain their original
+quarter-window channel slots, including silent slots for disabled actuators.
+`location_reference: segment1_from_base` interprets fractions relative to the
+150-mm first segment (45/105 mm), rather than the entire finger or tendon.
+For the optional
+two-span physics features, P1/P2 must actually lie on opposite sides of contact;
+they do not bracket contacts farther along the finger.
+
 ## Spring–tendon actuation
 
-The default preset now models the three stages in the sketch: relaxed at -10°,
+For the physical finger with interactive acoustic responses, run from this
+repository's root:
+
+```bash
+python -m streamlit run finger_physical_app.py
+```
+
+Wind the motor to load the tendon, then scroll to **Acoustic dynamics**. Enable
+**Excite P1–P4** independently and turn on **Run acoustic model**. Each transmitter
+has its own frequency and peak force. The unfolded-tendon graphic, four receiver
+waveforms, amplitude spectra, and RMS readouts update while the model runs.
+Switch exciters off to see free ringdown. Turning off **Run acoustic model**
+pauses the acoustic clock instead. **Reset acoustic response** clears acoustic
+state/history; **Reset model** also resets the mechanics and excitation controls.
+
+Enable **Apply contact** to press anywhere along the unfolded string. Adjust
+**Contact position (% from spool)** and **Contact force (N)** to compare the
+receiver responses. The arrow marks the selected point, including the tail past
+P4. Contact uses a demonstration force-dependent stiffness/damping law; it does
+not yet calculate static indentation or alter joint motion/tendon tension.
+
+This app uses [`finger_parameters.py`](finger_parameters.py) for geometry,
+mechanics, acoustic density/damping/mode count, sample rate, receiver gains, and
+contact stiffness/damping, force range, and control defaults. Its settings are
+independent of the CLI preset below.
+Finger lengths, paired guide stations, spring mounts and spool geometry are
+updated from `TASS_assy_1.STEP`. See [CAD dimensions and assumptions](tass_minimum/docs/cad_measurements.md)
+for measured versus inferred values and the confirmed outer-hole load-cell attachment.
+See [the acoustic preview model](tass_minimum/docs/finger_acoustics.md) for
+equations, assumptions, and testing. No hardware calibration is implied.
+
+The separate CLI default preset models the three stages in the sketch: relaxed at -10°,
 ready at 0°, and normal flexion. A geometric extension spring supplies the
 opposing torque. See [spring model, equations and run commands](tass_minimum/docs/spring_model.md).
 The upright spool height is 30 mm (`[0.03, 0]` in internal coordinates).
@@ -60,7 +193,7 @@ resolved configuration in JSON and YAML. YAML input is also supported.
 | `analysis` | CLI FFT interval, window, peak count and FRF threshold |
 | `app` | Streamlit mechanics defaults, servo response, timestep and equilibrium table |
 
-The Streamlit app loads `default.json` automatically; its sidebar accepts another
+The older `tass_finger_dynamics_app.py` loads `default.json` automatically; its sidebar accepts another
 JSON/YAML path. Its independent demonstration solver uses the `app` section for
 physical settings, not the CLI's `joint`/`axial` sections. Sliders override the
 loaded values for the current session and do not write back to disk.
@@ -318,7 +451,133 @@ For hardware/saved CSV processing:
 python -m tass --process-csv outputs/baseline_new/timeseries.csv --output outputs/reprocessed
 ```
 
-## First simulation dataset
+## Generate a straight-finger sweep dataset
+
+Run these commands from `Zach/` after installation. The physical model is in
+[`tass_minimum/config/default.json`](tass_minimum/config/default.json); the
+collection protocol is in
+[`dataset_straight_segments.json`](tass_minimum/config/experiments/dataset_straight_segments.json).
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+.venv/bin/python -m tass.dataset \
+  --config tass_minimum/config/default.json \
+  --protocol tass_minimum/config/experiments/dataset_straight_segments.json \
+  --output outputs/dataset_straight_chirp
+```
+
+Choose a **new, empty output directory** for every collection, including after a
+failed run. For example, replace the output with `outputs/dataset_straight_chirp_run2`
+if the first directory already contains files. Existing datasets are not overwritten.
+
+The protocol records 320 trials: four locations × four forces × 20 repeats.
+Each trial records 1.5 seconds at 48 kHz (72,000 samples), with the joint held
+straight at 0 radians. Actuators run for the first 0.3 seconds, then their
+drive is zero for the remaining 1.2 seconds while sensors capture vibration decay.
+Locations are 20%, 40%, 60%, and 80% of the combined physical segment lengths,
+measured from the finger base (0.05, 0.10, 0.15, and 0.20 m for a 0.25-m finger).
+Force classes are 1, 2, 5, and 10 N. All four actuators use a simultaneous linear
+20–2,000 Hz chirp with nominal 2-V peak amplitude; select `chirp_schedule: sequential`
+in the JSON protocol to excite one actuator per quarter-window instead.
+
+Edit these settings in `tass_minimum/config/experiments/dataset_straight_segments.json`
+before generating a new dataset:
+
+| Setting | Meaning | Current value |
+| --- | --- | --- |
+| `chirp_duration_s` | Actuation duration per channel; the full frequency sweep fits into this time | `0.3` seconds |
+| `window_s` | Total sensor recording duration, including actuation | `1.5` seconds |
+| `sample_rate_Hz` | Sensor and actuator samples per second | `48000` Hz |
+| `chirp_ramp_s` | Smooth amplitude ramp at each end of the actuation | `0.005` seconds |
+
+For **1.5 seconds after** a 0.3-second actuation, set `window_s` to `1.8`.
+For simultaneous excitation, `chirp_duration_s` must fit within `window_s`;
+for sequential excitation it must fit within `window_s / 4`. Sequential channels
+start at the beginning of each quarter-window and stop after `chirp_duration_s`.
+Omitting this setting (or using `null`) retains the full-slot sweep behavior.
+The sensors continue evolving after drive shutoff; the simulator does not
+reset their response. Decay depends on model damping, and voltage may settle
+to the configured sensor noise rather than exactly zero.
+Dataset timing uses these protocol settings, rather than `numerics.duration_s`
+or `app.duration_s` in the model configuration.
+
+Outputs include:
+
+- `trials/trial_XXXX.npz`: synchronized sensor/actuator voltages, mechanical
+  channels, timestamps, labels, and metadata.
+- `manifest.csv`: trial IDs, contact conditions, seeds, checksums, and data splits.
+- `example_trial.csv`: the full first trial as a table.
+- `model_config.json` and `protocol.json`: the exact input snapshots.
+- `summary.json`: completion status and collection statistics.
+
+This is synthetic static-contact data. Servo angle is measured from zero spool
+winding, so it need not be zero when the joint is straight. Actuator voltage
+uses the protocol's demonstration force-per-volt gain. The current hard-contact
+model cannot distinguish force magnitudes at fixed-segment or joint contacts
+through tension changes alone. Model distances ending in `_m` are metres:
+`anchor_extension_m: 0.03` means 30 mm, whereas `30` means 30 metres.
+See [model assumptions and channel definitions](tass_minimum/docs/dataset_channels.md).
+
+## Plot and export a trial
+
+Use a zero-based trial number (0–319 for this protocol) and the same dataset
+folder used during generation:
+
+```bash
+.venv/bin/python plot_trial.py 12 --dataset outputs/dataset_straight_chirp
+```
+
+For the existing `dataset_straight_chirp_fixed` collection, the shortcut is:
+
+```bash
+.venv/bin/python plot_trial.py 12
+```
+
+The script reads saved data; it does not rerun the simulation. Results are saved
+under the selected dataset's `trial_exports/` directory:
+
+| File | Contents |
+| --- | --- |
+| `trial_0012.csv` | Every timestamp and the requested voltage/contact/servo values |
+| `trial_0012_piezo.png` | Four rows: actuator drive voltage on the left, corresponding sensor voltage on the right |
+| `trial_0012_mechanics.png` | Contact force/location, servo angle/torque, and recorded finger pose |
+| `trial_0012_finger_upright.png` | Separate upright finger pose, with base at the bottom and fingertip at the top |
+
+The pose uses the saved model configuration, with +x pointing from base toward
+the fingertip and +y upward on the tendon side. It marks the spool, joint,
+P1–P4, spring attachments, and contact. A new export replaces the same trial's
+CSV/PNGs but leaves the source dataset unchanged.
+
+The upright figure includes only the finger diagram, with tendon guides,
+spool, spring, joint, and contact markers. It rotates the saved geometry 90°
+counterclockwise, placing the tendon on the left, and is exported automatically
+by the same command.
+
+To choose a different export folder:
+
+```bash
+.venv/bin/python plot_trial.py 12 \
+  --dataset outputs/dataset_straight_chirp \
+  --output outputs/my_trial_plots
+```
+
+To plot only the decay, choose the figure's time interval in seconds:
+
+```bash
+.venv/bin/python plot_trial.py 12 \
+  --dataset outputs/dataset_straight_chirp \
+  --start-s 0.3 --end-s 1.5
+```
+
+Use `--start-s 0 --end-s 0.4` to inspect the excitation and shutoff, or omit
+both options to plot the entire recording. These options set the time range
+and rescale the vertical axes to the visible samples in both time-series figures;
+the exported CSV still contains the full trial. They cannot add time beyond
+the saved recording. Changing the protocol requires generating a new dataset;
+existing datasets, including the plot script's default collection, retain their
+original timing. Use `--dataset` to select the newly generated collection.
+
+## First simulation dataset (legacy pulse protocol)
 
 The [Version 1 collection protocol](tass_minimum/docs/dataset_v1.md) specifies
 16 location/force conditions, 20 trials per condition, 1-second four-channel

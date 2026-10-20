@@ -39,7 +39,7 @@
       0.015
     ],
     "p4_m": [
-      0.23,
+      0.22,
       0.015
     ]
   },
@@ -186,7 +186,7 @@
     "enabled": true,
     "active_actuator": "pair1",
     "reference_angle_rad": 0.0,
-    "anchor_extension_m": 0.0,
+    "anchor_extension_m": 0.025,
     "sensor_gains": [
       1000.0,
       1000.0,

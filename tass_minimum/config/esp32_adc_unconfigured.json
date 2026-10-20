@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "resolution_bits": null,
+  "attenuation_db": null,
+  "voltage_to_code_gain_counts_per_V": null,
+  "zero_voltage_code": null,
+  "analog_gain_V_per_V": 1.0,
+  "analog_offset_V": 0.0,
+  "voltage_noise_std_V": 0.0,
+  "code_noise_std_counts": 0.0,
+  "highpass_cutoff_Hz": null,
+  "lowpass_cutoff_Hz": null,
+  "parameter_source": "unconfigured",
+  "notes": "Firmware and paired calibration data were not present in the repository as of 2026-10-15. Do not enable until resolution and voltage-to-count mapping are supplied."
+}

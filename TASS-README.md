@@ -8,8 +8,8 @@ A runnable Python model of the V1 single-joint finger, based on the supplied
 Motor angle → tendon winding → joint motion and tension → string vibration →
 synthetic piezo voltage → frequency features.
 
-**All dimensions and material properties are editable demonstration values.**
-They have not been calibrated against your prototype. This is a forward simulator,
+**The finger app uses CAD-derived geometry; material/dynamic properties remain uncalibrated.**
+The separate CLI presets retain demonstration dimensions. This is a forward simulator,
 not a trained contact-location or contact-force estimator.
 
 ## Collect prototype data
@@ -24,20 +24,21 @@ measurement-processing interface.
 
 ## Run it
 
-For the finger-only interactive app, run from the repository root:
+For the interactive finger and acoustic-preview app, run from the repository root:
 
 ```bash
 streamlit run finger_physical_app.py
 ```
 
 This app requires Streamlit, NumPy, and the existing package dependencies. It
-uses motor angle as its only physical input. Wind/unwind buttons, release, hold,
+uses motor angle as its mechanical input. Wind/unwind buttons, release, hold,
 and a motor-angle slider drive a persistent finger simulation with a live diagram
 and state readouts. Pause/resume freezes simulation time; reset restores the
 initial state. **Edit `finger_parameters.py` to adjust the entire finger app.**
 It groups segment lengths, P1–P4 piezo/idler-guide positions, load-cell location,
 linear spring stiffness/free length/attachments, tendon material constants,
-inertia, damping, motor/spool settings, and simulation/control settings.
+inertia, damping, motor/spool settings, acoustic material/damping, receiver gains,
+excitation defaults, and simulation/control settings.
 Coordinates and SI units are documented beside the values.
 
 Tendon stiffness is derived from `E*A/L0` using `tendon_young_modulus_Pa`,
@@ -51,10 +52,18 @@ rescale those values. The graphic fits the configured geometry automatically.
 
 Save changes and rerun/refresh the app. Changed settings reset the model and
 update the motor slider/button limits. The **Model parameters and equations**
-expander displays the active settings and effective tendon stiffness. All
-supplied values remain demonstration values. The separate batch/acoustic
+expander displays the active settings and effective tendon stiffness.
+[CAD dimensions and assumptions](tass_minimum/docs/cad_measurements.md) records
+the STEP-derived geometry, inferred distal stations, confirmed outer-hole tendon anchor
+and unmeasured spring/material properties. The separate batch/acoustic
 simulator below still uses `tass_minimum/config/default.json`.
-No acoustic solver runs. Its checks run with
+The **Acoustic dynamics** section adds independent P1–P4 excitation switches,
+frequency/force controls, a tendon-deflection graphic, four receiver traces,
+spectra, and RMS readouts. Wind the motor before running acoustics. Switch off
+excitation to see ringdown; switch off **Run acoustic model** to pause its clock.
+The preview uses the full route to the load cell and an independent slow-playback
+clock. [Model details](tass_minimum/docs/finger_acoustics.md) describe its limits.
+Its checks run with
 `python -m unittest discover -s tests -v` from the repository root.
 
 Requires Python 3.10 or later. Unzip the project and open a terminal in

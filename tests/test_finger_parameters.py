@@ -45,12 +45,41 @@ class FingerParameterTests(unittest.TestCase):
         self.assertIn('Fixed · 200 mm', svg)
         self.assertIn('Rotates · 150 mm', svg)
 
+    def test_spool_feed_is_tangent_and_updates_with_geometry(self):
+        for p in (FingerParameters(),
+                  replace(FingerParameters(), spool_radius_m=0.020),
+                  replace(FingerParameters(), tendon_p1_m=(0.035, 0.012)),
+                  replace(FingerParameters(), spool_feed_branch=1)):
+            model = FingerModel(p)
+            radius = model.tendon.spool_position - np.array(p.spool_position_m)
+            free_span = model.tendon.p1 - model.tendon.spool_position
+            self.assertAlmostEqual(np.linalg.norm(radius), p.spool_radius_m)
+            self.assertAlmostEqual(float(radius @ free_span), 0)
+            distance = np.linalg.norm(model.tendon.p1 - p.spool_position_m)
+            self.assertAlmostEqual(np.linalg.norm(free_span),
+                                   math.sqrt(distance**2-p.spool_radius_m**2))
+        self.assertLess(FingerParameters().spool_feed_position_m[0],
+                        FingerParameters().spool_position_m[0])
+
+    def test_cad_route_at_straight_pose(self):
+        model = FingerModel()
+        r = model.readouts()
+        # Independent dimensions in the STEP measurement record (metres).
+        self.assertAlmostEqual(r['tip_x_m'], 0.374)
+        self.assertAlmostEqual(r['span_1_m'], 0.116)
+        self.assertAlmostEqual(r['span_2_m'], 0.124)
+        self.assertAlmostEqual(r['span_3_m'], 0.080)
+        self.assertAlmostEqual(r['spring_length_m'], 0.046)
+        self.assertAlmostEqual(r['path_length_m'], 0.384182875, places=8)
+
     def test_invalid_measurements_report_the_field(self):
         for field, value in (
             ('tendon_rest_length_m', 0), ('tendon_young_modulus_Pa', -1),
             ('joint_inertia_kg_m2', 0), ('spring_stiffness_N_m', -1),
             ('tendon_stiffness_override_N_m', -1), ('tendon_p1_m', (0, float('nan'))),
             ('history_samples', 0), ('max_step_s', 0),
+            ('spool_feed_branch', 0), ('spool_radius_m', 0.1),
+            ('tendon_p1_m', FingerParameters().spool_position_m),
         ):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 replace(FingerParameters(), **{field: value})
