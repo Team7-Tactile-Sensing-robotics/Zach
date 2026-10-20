@@ -37,24 +37,25 @@ class FingerModelTests(unittest.TestCase):
         model.set_motor_target(90)
         model.advance(2)
         r = model.readouts()
-        # Independent closed-form lengths/moment arms for the default layout.
+        # Independent symmetric-geometry solution for the CAD layout:
+        # P2/P3 are 40 mm from the hinge, 15.53607 mm toward the tendon;
+        # spring mounts are +/-23 mm axial and 29.3094 mm behind the hinge.
         def balance(q):
-            bridge = math.hypot(0.030+0.025*math.cos(q)-0.005*math.sin(q),
-                                0.025*math.sin(q)+0.005*math.cos(q)-0.005)
-            tendon_arm = ((0.030*0.025-0.005**2)*math.sin(q)+0.005*0.055*math.cos(q))/bridge
-            tension = 2500*max(0, 0.006*math.pi/2 + bridge-0.055)
-            length = 2*(0.012*math.cos(q/2)+0.020*math.sin(q/2))
-            spring_arm = -0.012*math.sin(q/2)+0.020*math.cos(q/2)
-            return tension*tendon_arm - 500*max(0, length-0.024)*spring_arm
-        expected = brentq(balance, 0, 1.5)
+            bridge = 2*(0.040*math.cos(q/2)-0.01553607*math.sin(q/2))
+            tendon_arm = 0.040*math.sin(q/2)+0.01553607*math.cos(q/2)
+            tension = 2500*max(0, 0.030*math.pi/2 + bridge-0.080)
+            length = 2*(0.023*math.cos(q/2)+0.02930940*math.sin(q/2))
+            spring_arm = -0.023*math.sin(q/2)+0.02930940*math.cos(q/2)
+            return tension*tendon_arm - 500*max(0, length-0.046)*spring_arm
+        expected = brentq(balance, 0, math.radians(100))
         self.assertAlmostEqual(r['joint_angle_deg'], math.degrees(expected), delta=0.01)
         self.assertGreater(r['spring_force_N'], 0)
         self.assertEqual(r['load_cell_force_N'], r['tension_N'])
-        self.assertAlmostEqual(r['load_cell_tail_m'], 0.020)
+        self.assertAlmostEqual(r['load_cell_tail_m'], math.hypot(0.024, 0.01668574-0.01553607))
         self.assertAlmostEqual(r['tendon_torque_Nm']+r['spring_torque_Nm'], 0, delta=1e-5)
-        self.assertAlmostEqual(r['span_1_m'], 0.080)
-        self.assertAlmostEqual(r['span_2_m'], 0.055)
-        self.assertLess(r['span_3_m'], 0.055)
+        self.assertAlmostEqual(r['span_1_m'], 0.116)
+        self.assertAlmostEqual(r['span_2_m'], 0.124)
+        self.assertLess(r['span_3_m'], 0.080)
         model.set_motor_target(0)
         for _ in range(20):
             model.advance(0.1)
@@ -100,7 +101,7 @@ class FingerModelTests(unittest.TestCase):
 
     def test_editable_geometry_and_preloaded_spring(self):
         p = replace(FingerParameters(), load_cell_offset_m=(0.11, 0.005),
-                    spring_free_length_m=0.020, tendon_p4_offset_m=(0.075, 0.005))
+                    spring_free_length_m=0.042, tendon_p4_offset_m=(0.075, 0.005))
         model = FingerModel(p)
         r = model.readouts()
         self.assertAlmostEqual(r['load_cell_tail_m'], 0.035)

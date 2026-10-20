@@ -1,0 +1,7 @@
+{
+  "echo_features_enabled": true,
+  "echo_gate_s": [0.008, 0.105],
+  "echo_min_peak_distance_s": 0.006,
+  "echo_min_amplitude_V": 0.01,
+  "echo_prominence_fraction": 0.15
+}

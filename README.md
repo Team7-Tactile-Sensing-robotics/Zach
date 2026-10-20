@@ -3,7 +3,13 @@
 Zach includes an interactive finger-mechanics app, a time-domain reference
 simulation, and the routed modal vibration model adapted from
 `string-finger-simulator`. It runs independently; the sibling repository is
-not required. Parameters are demonstration values, not hardware calibration.
+not required. The finger app geometry uses the supplied STEP assembly;
+material and dynamic properties still require hardware calibration.
+
+For FFT feature extraction and parallel linear/logistic comparisons of contact
+force and location, see the separate [machine learning framework](machine_learning/README.md).
+It includes a recording template, standardized interaction/subset experiments,
+grouped validation, significance tables and a runnable synthetic example.
 
 ## Install
 
@@ -121,7 +127,38 @@ they do not bracket contacts farther along the finger.
 
 ## Spring–tendon actuation
 
-The default preset now models the three stages in the sketch: relaxed at -10°,
+For the physical finger with interactive acoustic responses, run from this
+repository's root:
+
+```bash
+python -m streamlit run finger_physical_app.py
+```
+
+Wind the motor to load the tendon, then scroll to **Acoustic dynamics**. Enable
+**Excite P1–P4** independently and turn on **Run acoustic model**. Each transmitter
+has its own frequency and peak force. The unfolded-tendon graphic, four receiver
+waveforms, amplitude spectra, and RMS readouts update while the model runs.
+Switch exciters off to see free ringdown. Turning off **Run acoustic model**
+pauses the acoustic clock instead. **Reset acoustic response** clears acoustic
+state/history; **Reset model** also resets the mechanics and excitation controls.
+
+Enable **Apply contact** to press anywhere along the unfolded string. Adjust
+**Contact position (% from spool)** and **Contact force (N)** to compare the
+receiver responses. The arrow marks the selected point, including the tail past
+P4. Contact uses a demonstration force-dependent stiffness/damping law; it does
+not yet calculate static indentation or alter joint motion/tendon tension.
+
+This app uses [`finger_parameters.py`](finger_parameters.py) for geometry,
+mechanics, acoustic density/damping/mode count, sample rate, receiver gains, and
+contact stiffness/damping, force range, and control defaults. Its settings are
+independent of the CLI preset below.
+Finger lengths, paired guide stations, spring mounts and spool geometry are
+updated from `TASS_assy_1.STEP`. See [CAD dimensions and assumptions](tass_minimum/docs/cad_measurements.md)
+for measured versus inferred values and the confirmed outer-hole load-cell attachment.
+See [the acoustic preview model](tass_minimum/docs/finger_acoustics.md) for
+equations, assumptions, and testing. No hardware calibration is implied.
+
+The separate CLI default preset models the three stages in the sketch: relaxed at -10°,
 ready at 0°, and normal flexion. A geometric extension spring supplies the
 opposing torque. See [spring model, equations and run commands](tass_minimum/docs/spring_model.md).
 The upright spool height is 30 mm (`[0.03, 0]` in internal coordinates).
@@ -156,7 +193,7 @@ resolved configuration in JSON and YAML. YAML input is also supported.
 | `analysis` | CLI FFT interval, window, peak count and FRF threshold |
 | `app` | Streamlit mechanics defaults, servo response, timestep and equilibrium table |
 
-The Streamlit app loads `default.json` automatically; its sidebar accepts another
+The older `tass_finger_dynamics_app.py` loads `default.json` automatically; its sidebar accepts another
 JSON/YAML path. Its independent demonstration solver uses the `app` section for
 physical settings, not the CLI's `joint`/`axial` sections. Sliders override the
 loaded values for the current session and do not write back to disk.
